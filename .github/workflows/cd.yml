@@ -44,7 +44,7 @@ jobs:
           # Build the image
           docker build -t $REGISTRY/$IMAGE_NAME:latest \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
-            ./nexus
+            .
 
           # Login to GHCR
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u $USERNAME --password-stdin
