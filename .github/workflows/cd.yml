@@ -85,6 +85,16 @@ jobs:
             echo "🔐 Logging into container registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+            # Check if port 5432 is available, if not use 5433
+            echo "🔍 Checking PostgreSQL port..."
+            if sudo lsof -i :5432 > /dev/null 2>&1; then
+              echo "Port 5432 in use, changing to 5433..."
+              sed -i 's/"5432:5432"/"5433:5432"/g' docker-compose.yml
+              POSTGRES_PORT=5433
+            else
+              POSTGRES_PORT=5432
+            fi
+
             # Pull new image
             echo "🐳 Pulling Docker image..."
             docker compose pull nexus
