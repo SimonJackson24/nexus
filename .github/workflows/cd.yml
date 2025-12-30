@@ -35,16 +35,19 @@ jobs:
 
       - name: Build and push Docker image
         env:
-          REGISTRY: ghcr.io/${{ github.actor }}
-          IMAGE_NAME: nexus
+          USERNAME: ${{ github.actor }}
         run: |
+          # Convert username to lowercase for ghcr.io
+          REGISTRY="ghcr.io/${USERNAME,,}"
+          IMAGE_NAME="nexus"
+
           # Build the image
           docker build -t $REGISTRY/$IMAGE_NAME:latest \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
             ./nexus
 
           # Login to GHCR
-          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u $USERNAME --password-stdin
 
           # Push to registry
           docker push $REGISTRY/$IMAGE_NAME:latest
