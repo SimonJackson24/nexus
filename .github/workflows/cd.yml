@@ -73,7 +73,7 @@ jobs:
             echo "=========================================="
 
             # Navigate to app directory
-            cd /home/nexus/current/nexus
+            cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
 
             # Pull latest changes
             echo "📦 Pulling latest code..."
