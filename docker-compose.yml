@@ -106,7 +106,7 @@ services:
   # Supabase Studio (Database UI)
   # ========================================
   studio:
-    image: supabase/studio:v0.49.0
+    image: supabase/studio:v0.24.0
     container_name: nexus-studio
     depends_on:
       - kong
