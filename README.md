@@ -118,3 +118,5 @@ MIT License - see LICENSE for details.
 ---
 
 Built with ❤️ for the agentic coding portfolio
+<!-- CI Test -->
+
