@@ -79,7 +79,8 @@ jobs:
             echo "📦 Pulling latest code..."
             git fetch origin main
             git checkout main
-            git pull origin main
+            git stash || true
+            git pull origin main || git reset --hard origin/main
 
             # Login to container registry
             echo "🔐 Logging into container registry..."
