@@ -103,25 +103,6 @@ services:
     restart: unless-stopped
 
   # ========================================
-  # Supabase Studio (Database UI)
-  # ========================================
-  studio:
-    image: supabase/studio:2024-01-01
-    container_name: nexus-studio
-    depends_on:
-      - kong
-    environment:
-      STUDIO_PG_META_URL: http://postgrest:3001
-      STUDIO_HOST: 0.0.0.0
-      STUDIO_PORT: 3000
-      STUDIO_DEFAULT_PROJECT: nexus
-    ports:
-      - "54321:3000"
-    networks:
-      - nexus-network
-    restart: unless-stopped
-
-  # ========================================
   # Nexus Next.js Application
   # ========================================
   nexus:
