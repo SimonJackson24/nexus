@@ -19,7 +19,10 @@ RUN npm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY public ./public
+COPY src ./src
+COPY next.config.mjs .
+COPY package.json .
 
 # Generate build
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -37,9 +40,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files
+# Copy public folder first
 COPY --from=builder /app/public ./public
+# Copy standalone output
 COPY --from=builder /app/.next/standalone ./
+# Copy static files
 COPY --from=builder /app/.next/static ./.next/static
 
 # Set ownership
