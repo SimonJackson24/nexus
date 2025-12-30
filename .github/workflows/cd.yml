@@ -87,12 +87,12 @@ jobs:
 
             # Check if port 5432 is available, if not use 5433
             echo "🔍 Checking PostgreSQL port..."
-            if sudo lsof -i :5432 > /dev/null 2>&1; then
+            if ss -tlnp | grep -q ':5432'; then
               echo "Port 5432 in use, changing to 5433..."
               sed -i 's/"5432:5432"/"5433:5432"/g' docker-compose.yml
-              POSTGRES_PORT=5433
+              sed -i 's/@postgres:5432/@postgres:5433/g' docker-compose.yml
             else
-              POSTGRES_PORT=5432
+              echo "Port 5432 is free, using default..."
             fi
 
             # Pull new image
