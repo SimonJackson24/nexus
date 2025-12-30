@@ -1,0 +1,145 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+          IMAGE_NAME: nexus
+        run: |
+          # Build the image
+          docker build -t $REGISTRY/$IMAGE_NAME:latest \
+            --build-arg NEXT_TELEMETRY_DISABLED=1 \
+            ./nexus
+          
+          # Login to GHCR
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # Push to registry
+          docker push $REGISTRY/$IMAGE_NAME:latest
+          
+          # Tag with commit SHA
+          docker tag $REGISTRY/$IMAGE_NAME:latest $REGISTRY/$IMAGE_NAME:${{ github.sha }}
+          docker push $REGISTRY/$IMAGE_NAME:${{ github.sha }}
+          
+          echo "image_ref=$REGISTRY/$IMAGE_NAME:latest" >> $GITHUB_OUTPUT
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            echo "=========================================="
+            echo "Nexus Deployment Started"
+            echo "Time: $(date)"
+            echo "Commit: ${{ github.sha }}"
+            echo "=========================================="
+            
+            # Navigate to app directory
+            cd /home/nexus/current/nexus
+            
+            # Pull latest changes
+            echo "📦 Pulling latest code..."
+            git fetch origin main
+            git checkout main
+            git pull origin main
+            
+            # Login to container registry
+            echo "🔐 Logging into container registry..."
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull new image
+            echo "🐳 Pulling Docker image..."
+            docker compose pull nexus
+            
+            # Restart services
+            echo "🔄 Restarting services..."
+            docker compose up -d --force-recreate
+            
+            # Wait for healthy
+            echo "⏳ Waiting for container to be healthy..."
+            sleep 30
+            
+            # Health check
+            HEALTH=$(curl -s http://localhost:3000/api/health || echo "failed")
+            if echo "$HEALTH" | grep -q "healthy"; then
+              echo "✅ Deployment successful!"
+            else
+              echo "❌ Health check failed, checking logs..."
+              docker compose logs --tail=50 nexus
+              exit 1
+            fi
+            
+            # Cleanup old images
+            echo "🧹 Cleaning up old Docker images..."
+            docker image prune -f
+            
+            # Log deployment
+            echo "📝 Logging deployment..."
+            echo "${{ github.sha }} - $(date)" >> deployment.log
+            
+            echo "=========================================="
+            echo "Deployment completed at $(date)"
+            echo "=========================================="
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Check deployment result
+        id: result
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "::error::Deployment failed!"
+          fi
+          
+      - name: Discord notification (optional)
+        if: always() && env.DISCORD_WEBHOOK != ''
+        uses: appleboy/discord-action@v1.0.0
+        with:
+          webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID }}
+          webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
+          message: |
+            🚀 Nexus Deployment ${{ steps.result.outputs.status }}
+            - Branch: main
+            - Commit: ${{ github.sha }}
+            - Triggered by: ${{ github.actor }}

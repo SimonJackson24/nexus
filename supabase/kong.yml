@@ -1,0 +1,53 @@
+# Kong API Gateway Configuration for Nexus
+# Routes external requests to internal Supabase services
+
+_format_version: "3.0"
+
+# ========================================
+# Services
+# ========================================
+
+services:
+  # Auth Service (GoTrue)
+  - name: gotrue
+    url: http://gotrue:9999
+    routes:
+      - name: gotrue-route
+        paths:
+          - /auth/v1
+        strip_path: false
+
+  # REST API (PostgREST)
+  - name: postgrest
+    url: http://postgrest:3001
+    routes:
+      - name: postgrest-route
+        paths:
+          - /rest/v1
+        strip_path: false
+
+  # Nexus Application
+  - name: nexus
+    url: http://nexus:3000
+    routes:
+      - name: nexus-route
+        paths:
+          - /
+        strip_path: false
+
+# ========================================
+# Rate Limiting (Optional)
+# ========================================
+
+# Uncomment to enable rate limiting
+# plugins:
+#   - name: rate-limiting
+#     config:
+#       minute: 100
+#       policy: local
+
+# ========================================
+# CORS Configuration
+# ========================================
+
+# CORS is handled by the individual services
