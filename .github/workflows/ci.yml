@@ -98,7 +98,6 @@ jobs:
           
       - name: Check for critical vulnerabilities
         run: |
-          # Extract critical and high severity counts
           CRITICAL=$(grep -o '"severity":"CRITICAL"' trivy-results.sarif | wc -l || echo "0")
           HIGH=$(grep -o '"severity":"HIGH"' trivy-results.sarif | wc -l || echo "0")
           
@@ -131,11 +130,9 @@ jobs:
         
       - name: Run container tests
         run: |
-          # Simple health check test
           docker run --rm -d --name nexus-test nexus:ci
           sleep 10
           
-          # Check if container is running
           if docker ps --filter name=nexus-test --format '{{.Names}}' | grep -q nexus-test; then
             echo "Container is running"
           else
@@ -144,26 +141,4 @@ jobs:
             exit 1
           fi
           
-          # Cleanup
           docker stop nexus-test
-
-summary:
-  name: CI Summary
-  needs: [lint, build, security-scan, test]
-  runs-on: ubuntu-latest
-  if: always()
-  
-  steps:
-    - name: Summary
-      run: |
-        echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        for job in lint build security-scan test; do
-          status=$(jq -r ".jobs.\"$job\".result" "$GITHUB_OUTPUT" 2>/dev/null || echo "completed")
-          if [ "$status" = "success" ]; then
-            echo "✓ $job: Passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✗ $job: Failed" >> $GITHUB_STEP_SUMMARY
-          fi
-        done
