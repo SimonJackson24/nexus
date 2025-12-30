@@ -85,26 +85,46 @@ jobs:
             echo "🔐 Logging into container registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+            # Function to find free port
+            find_free_port() {
+              local base_port=$1
+              local port=$base_port
+              while ss -tlnp | grep -q ":$port "; do
+                port=$((port + 1))
+              done
+              echo $port
+            }
+            
             # Check and adjust ports if needed
             echo "🔍 Checking ports..."
             
-            # PostgreSQL: 5432 → 5433
-            if ss -tlnp | grep -q ':5432'; then
-              echo "Port 5432 in use, changing to 5433..."
-              sed -i 's/"5432:5432"/"5433:5432"/g' docker-compose.yml
-              sed -i 's/@postgres:5432/@postgres:5433/g' docker-compose.yml
+            # PostgreSQL: 5432 → find free
+            if ss -tlnp | grep -q ':5432 '; then
+              NEW_PORT=$(find_free_port 5432)
+              echo "Port 5432 in use, changing to $NEW_PORT..."
+              sed -i "s/\"5432:5432\"/\"$NEW_PORT:5432\"/g" docker-compose.yml
+              sed -i "s/@postgres:5432/@postgres:$NEW_PORT/g" docker-compose.yml
             fi
             
-            # Redis: 6379 → 6378
-            if ss -tlnp | grep -q ':6379'; then
-              echo "Port 6379 in use, changing to 6378..."
-              sed -i 's/"6379:6379"/"6378:6379"/g' docker-compose.yml
+            # Redis: 6379 → find free
+            if ss -tlnp | grep -q ':6379 '; then
+              NEW_PORT=$(find_free_port 6379)
+              echo "Port 6379 in use, changing to $NEW_PORT..."
+              sed -i "s/\"6379:6379\"/\"$NEW_PORT:6379\"/g" docker-compose.yml
             fi
             
-            # Nexus App: 3000 → 3001
-            if ss -tlnp | grep -q ':3000'; then
-              echo "Port 3000 in use, changing to 3001..."
-              sed -i 's/"3000:3000"/"3001:3000"/g' docker-compose.yml
+            # Nexus App: 3011 → find free
+            if ss -tlnp | grep -q ':3011 '; then
+              NEW_PORT=$(find_free_port 3011)
+              echo "Port 3011 in use, changing to $NEW_PORT..."
+              sed -i "s/\"$NEW_PORT:3000\"/\"$((NEW_PORT + 1)):3000\"/g" docker-compose.yml
+            fi
+            
+            # Kong: 8100 → find free
+            if ss -tlnp | grep -q ':8100 '; then
+              NEW_PORT=$(find_free_port 8100)
+              echo "Port 8100 in use, changing to $NEW_PORT..."
+              sed -i "s/\"$NEW_PORT:8000\"/\"$((NEW_PORT + 1)):8000\"/g" docker-compose.yml
             fi
 
             # Pull new image
@@ -120,7 +140,7 @@ jobs:
             sleep 30
 
             # Health check
-            HEALTH=$(curl -s http://localhost:3000/api/health || echo "failed")
+            HEALTH=$(curl -s http://localhost:3011/api/health || echo "failed")
             if echo "$HEALTH" | grep -q "healthy"; then
               echo "✅ Deployment successful!"
             else

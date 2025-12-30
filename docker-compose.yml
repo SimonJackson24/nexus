@@ -96,8 +96,8 @@ services:
     volumes:
       - ./supabase/kong.yml:/kong/kong.yml:ro
     ports:
-      - "8000:8000"
-      - "8001:8001"
+      - "8100:8000"
+      - "8101:8001"
     networks:
       - nexus-network
     restart: unless-stopped
@@ -130,7 +130,7 @@ services:
       NODE_ENV: production
       NEXUS_SECRET_KEY: ${NEXUS_SECRET_KEY}
     ports:
-      - "3000:3000"
+      - "3011:3000"
     volumes:
       - nexus-uploads:/app/uploads
     networks:
