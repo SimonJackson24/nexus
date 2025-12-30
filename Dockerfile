@@ -19,10 +19,17 @@ RUN npm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY public ./public
-COPY src ./src
+
+# Copy all config files first
 COPY next.config.mjs .
 COPY package.json .
+COPY postcss.config.mjs .
+COPY tailwind.config.ts .
+COPY tsconfig.json .
+
+# Copy source and public
+COPY public ./public
+COPY src ./src
 
 # Generate build
 ENV NEXT_TELEMETRY_DISABLED=1
