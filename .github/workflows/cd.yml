@@ -117,14 +117,15 @@ jobs:
             if ss -tlnp | grep -q ':3011 '; then
               NEW_PORT=$(find_free_port 3011)
               echo "Port 3011 in use, changing to $NEW_PORT..."
-              sed -i "s/\"$NEW_PORT:3000\"/\"$((NEW_PORT + 1)):3000\"/g" docker-compose.yml
+              sed -i "s/\"3011:3000\"/\"$NEW_PORT:3000\"/g" docker-compose.yml
             fi
             
             # Kong: 8100 → find free
             if ss -tlnp | grep -q ':8100 '; then
               NEW_PORT=$(find_free_port 8100)
               echo "Port 8100 in use, changing to $NEW_PORT..."
-              sed -i "s/\"$NEW_PORT:8000\"/\"$((NEW_PORT + 1)):8000\"/g" docker-compose.yml
+              sed -i "s/\"8100:8000\"/\"$NEW_PORT:8000\"/g" docker-compose.yml
+              sed -i "s/\"8101:8001\"/\"$((NEW_PORT + 1)):8001\"/g" docker-compose.yml
             fi
 
             # Pull new image
