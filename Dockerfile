@@ -9,17 +9,27 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY package.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm install
 
 # ============================================
 # Stage 2: Builder
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+
+# Copy all config files first
+COPY next.config.mjs .
+COPY package.json .
+COPY postcss.config.mjs .
+COPY tailwind.config.ts .
+COPY tsconfig.json .
+
+# Copy source and public
+COPY public ./public
+COPY src ./src
 
 # Generate build
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -37,9 +47,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files
+# Copy public folder first
 COPY --from=builder /app/public ./public
+# Copy standalone output
 COPY --from=builder /app/.next/standalone ./
+# Copy static files
 COPY --from=builder /app/.next/static ./.next/static
 
 # Set ownership

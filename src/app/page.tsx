@@ -81,7 +81,7 @@ function ChatItem({
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
-  const agent = getDemoAgent(chat.agentId);
+  const agent = chat.agentId ? getDemoAgent(chat.agentId) : undefined;
   const [copied, setCopied] = useState(false);
   const lastMessage = chat.messages[chat.messages.length - 1];
 

@@ -10,28 +10,28 @@ jobs:
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nexus
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          path: nexus
         
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
           
       - name: Install dependencies
-        working-directory: ./nexus
-        run: npm ci
+        run: npm install --no-audit --no-fund
         
       - name: Run ESLint
-        working-directory: ./nexus
         run: npm run lint
-        continue-on-error: false
         
       - name: Check TypeScript types
-        working-directory: ./nexus
         run: npx tsc --noEmit --skipLibCheck
 
   build:
@@ -42,20 +42,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          path: nexus
         
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         
       - name: Build Docker image
-        working-directory: ./nexus
         run: |
+          cd nexus
           docker build -t nexus:ci \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
             .
           
       - name: Export Docker image
-        working-directory: ./nexus
-        run: docker save nexus:ci > nexus-ci.tar
+        run: |
+          cd nexus
+          docker save nexus:ci > nexus-ci.tar
         
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -90,7 +93,7 @@ jobs:
           output: 'trivy-results.sarif'
           
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -98,7 +101,6 @@ jobs:
           
       - name: Check for critical vulnerabilities
         run: |
-          # Extract critical and high severity counts
           CRITICAL=$(grep -o '"severity":"CRITICAL"' trivy-results.sarif | wc -l || echo "0")
           HIGH=$(grep -o '"severity":"HIGH"' trivy-results.sarif | wc -l || echo "0")
           
@@ -131,11 +133,9 @@ jobs:
         
       - name: Run container tests
         run: |
-          # Simple health check test
           docker run --rm -d --name nexus-test nexus:ci
           sleep 10
           
-          # Check if container is running
           if docker ps --filter name=nexus-test --format '{{.Names}}' | grep -q nexus-test; then
             echo "Container is running"
           else
@@ -144,26 +144,4 @@ jobs:
             exit 1
           fi
           
-          # Cleanup
           docker stop nexus-test
-
-summary:
-  name: CI Summary
-  needs: [lint, build, security-scan, test]
-  runs-on: ubuntu-latest
-  if: always()
-  
-  steps:
-    - name: Summary
-      run: |
-        echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        for job in lint build security-scan test; do
-          status=$(jq -r ".jobs.\"$job\".result" "$GITHUB_OUTPUT" 2>/dev/null || echo "completed")
-          if [ "$status" = "success" ]; then
-            echo "✓ $job: Passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✗ $job: Failed" >> $GITHUB_STEP_SUMMARY
-          fi
-        done
