@@ -85,14 +85,26 @@ jobs:
             echo "🔐 Logging into container registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Check if port 5432 is available, if not use 5433
-            echo "🔍 Checking PostgreSQL port..."
+            # Check and adjust ports if needed
+            echo "🔍 Checking ports..."
+            
+            # PostgreSQL: 5432 → 5433
             if ss -tlnp | grep -q ':5432'; then
               echo "Port 5432 in use, changing to 5433..."
               sed -i 's/"5432:5432"/"5433:5432"/g' docker-compose.yml
               sed -i 's/@postgres:5432/@postgres:5433/g' docker-compose.yml
-            else
-              echo "Port 5432 is free, using default..."
+            fi
+            
+            # Redis: 6379 → 6378
+            if ss -tlnp | grep -q ':6379'; then
+              echo "Port 6379 in use, changing to 6378..."
+              sed -i 's/"6379:6379"/"6378:6379"/g' docker-compose.yml
+            fi
+            
+            # Nexus App: 3000 → 3001
+            if ss -tlnp | grep -q ':3000'; then
+              echo "Port 3000 in use, changing to 3001..."
+              sed -i 's/"3000:3000"/"3001:3000"/g' docker-compose.yml
             fi
 
             # Pull new image
