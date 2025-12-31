@@ -1,146 +1,343 @@
-import { createClient } from '@/lib/supabase/server';
-import { NextResponse } from 'next/server';
-import { getAIClient, MODELS, Provider } from '@/lib/ai/clients';
-import { calculateCreditsNeeded } from '@/lib/billing/types';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import OpenAI from 'openai';
+import { Anthropic } from '@anthropic-ai/sdk';
+import { decryptApiKey } from '@/lib/billing/api-key-service';
+import { 
+  checkUsageEligibility, 
+  calculateCredits, 
+  recordUsage,
+  getUserApiKeys,
+  updateKeyLastUsed,
+  markKeyInvalid,
+  getUserSubscription 
+} from '@/lib/billing/usage-service';
 
-// Credit rates per model (credits per 1K tokens)
-const CREDIT_RATES: Record<string, number> = {
-  // OpenAI
-  'gpt-4-turbo-preview': 10,
-  'gpt-4': 30,
-  'gpt-3.5-turbo': 1,
-  // Anthropic
-  'claude-opus-4-20240307': 15,
-  'claude-sonnet-4-20250514': 3,
-  'claude-haiku-3-20250514': 1,
-  // MiniMax
-  'abab6.5s-chat': 1,
-  'abab6.5-chat': 1,
-};
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// POST /api/chat/completions - AI chat completion
-export async function POST(request: Request) {
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+// Supported providers
+const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek', 'openrouter'] as const;
+type Provider = typeof PROVIDERS[number];
+
+// POST /api/chat/completions - Handle AI chat completions with BYOK support
+export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient();
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Please sign in to use AI features' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { messages, provider, model, chatId } = body;
+    const { 
+      messages, 
+      model, 
+      provider = 'openai', 
+      temperature, 
+      max_tokens, 
+      stream = false,
+      chat_id,
+      use_byok = false,
+    } = body;
 
-    // Validate required fields
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    if (!messages || !model) {
       return NextResponse.json(
-        { error: 'Messages array is required' },
+        { error: 'Messages and model are required' },
         { status: 400 }
       );
     }
 
-    // Get the AI client
-    const selectedProvider: Provider = (provider as Provider) || 'openai';
-    const selectedModel = model || MODELS[selectedProvider]?.[0]?.id || 'gpt-4-turbo-preview';
-
-    // Check if API key is configured
-    const apiKeyConfigured = 
-      (selectedProvider === 'openai' && process.env.OPENAI_API_KEY) ||
-      (selectedProvider === 'anthropic' && process.env.ANTHROPIC_API_KEY) ||
-      (selectedProvider === 'minimax' && process.env.MINIMAX_API_KEY);
-
-    if (!apiKeyConfigured) {
+    if (!PROVIDERS.includes(provider as Provider)) {
       return NextResponse.json(
-        { error: `API key not configured for ${selectedProvider}` },
-        { status: 503 }
+        { error: `Unsupported provider: ${provider}` },
+        { status: 400 }
       );
     }
 
-    // Check user credits
-    const { data: userCredits } = await supabase
-      .from('user_credits')
-      .select('credits_balance')
-      .eq('user_id', user.id)
-      .single();
-
-    // Estimate credits needed (pre-check)
-    const estimatedCredits = Math.ceil(CREDIT_RATES[selectedModel] || 5);
+    // Get user's subscription
+    const subscription = await getUserSubscription(user.id);
     
-    if (!userCredits || userCredits.credits_balance < estimatedCredits) {
+    // Determine if we should use BYOK
+    const shouldUseByok = use_byok || 
+      (subscription?.subscription_mode === 'byok') ||
+      (!subscription?.credits_balance || subscription.credits_balance <= 0);
+
+    let apiKey: string | undefined;
+    let keyId: string | undefined;
+
+    if (shouldUseByok) {
+      // Get user's API keys for this provider
+      const keys = await getUserApiKeys(user.id, provider);
+      
+      if (keys.length === 0) {
+        return NextResponse.json(
+          { 
+            error: 'No API key found for this provider',
+            requires_byok_setup: true,
+            provider,
+          },
+          { status: 402 }
+        );
+      }
+
+      // Use the first valid key
+      const userKey = keys[0];
+      try {
+        apiKey = decryptApiKey(userKey.encrypted_key);
+        keyId = userKey.id;
+      } catch (error) {
+        console.error('Error decrypting API key:', error);
+        return NextResponse.json(
+          { error: 'Failed to decrypt API key' },
+          { status: 500 }
+        );
+      }
+    } else {
+      // Use platform's API key (from environment)
+      switch (provider) {
+        case 'openai':
+          apiKey = process.env.OPENAI_API_KEY;
+          break;
+        case 'anthropic':
+          apiKey = process.env.ANTHROPIC_API_KEY;
+          break;
+        // Add other providers as needed
+      }
+    }
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'API key not configured' },
+        { status: 500 }
+      );
+    }
+
+    // Calculate estimated credits (will be adjusted based on actual usage)
+    const estimatedCredits = calculateCredits(provider, model, 0, 0).credits;
+
+    // Check eligibility (skip for BYOK)
+    if (!shouldUseByok) {
+      const eligibility = await checkUsageEligibility(user.id, provider, model, estimatedCredits);
+      
+      if (!eligibility.allowed) {
+        return NextResponse.json(
+          { 
+            error: eligibility.reason,
+            credits_remaining: eligibility.credits_remaining,
+            requires_byok: eligibility.requires_byok,
+          },
+          { status: 402 }
+        );
+      }
+    }
+
+    // Make the API call
+    let response;
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      switch (provider) {
+        case 'openai': {
+          const client = new OpenAI({ apiKey });
+          response = await client.chat.completions.create({
+            model,
+            messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+            temperature,
+            max_tokens,
+            stream,
+          });
+
+          if (!stream) {
+            const chatResponse = response as OpenAI.Chat.ChatCompletion;
+            inputTokens = chatResponse.usage?.prompt_tokens || 0;
+            outputTokens = chatResponse.usage?.completion_tokens || 0;
+          }
+          break;
+        }
+
+        case 'anthropic': {
+          const client = new Anthropic({ apiKey });
+          const systemMessage = messages.find((m: any) => m.role === 'system');
+          const userMessages = messages.filter((m: any) => m.role !== 'system');
+
+          response = await client.messages.create({
+            model,
+            max_tokens: max_tokens || 4096,
+            temperature,
+            system: systemMessage?.content,
+            messages: userMessages.map((m: any) => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+            })),
+            stream,
+          });
+
+          if (!stream) {
+            inputTokens = response.usage.input_tokens;
+            outputTokens = response.usage.output_tokens;
+          }
+          break;
+        }
+
+        case 'deepseek': {
+          const client = new OpenAI({
+            apiKey,
+            baseURL: 'https://api.deepseek.com',
+          });
+          response = await client.chat.completions.create({
+            model,
+            messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+            temperature,
+            max_tokens,
+            stream,
+          });
+
+          if (!stream) {
+            const chatResponse = response as OpenAI.Chat.ChatCompletion;
+            inputTokens = chatResponse.usage?.prompt_tokens || 0;
+            outputTokens = chatResponse.usage?.completion_tokens || 0;
+          }
+          break;
+        }
+
+        default:
+          return NextResponse.json(
+            { error: `Provider ${provider} not yet implemented` },
+            { status: 501 }
+          );
+      }
+    } catch (apiError: any) {
+      // If BYOK key failed, mark it as invalid
+      if (shouldUseByok && keyId) {
+        await markKeyInvalid(keyId, apiError.message || 'API call failed');
+      }
+
       return NextResponse.json(
         { 
-          error: 'Insufficient credits',
-          code: 'INSUFFICIENT_CREDITS',
-          required: estimatedCredits,
-          current: userCredits?.credits_balance || 0,
+          error: apiError.message || 'AI API error',
+          provider_error: true,
         },
-        { status: 402 }
+        { status: apiError.status || 500 }
       );
     }
 
-    // Get AI client and make the request
-    const aiClient = getAIClient(selectedProvider, selectedModel);
-    
-    const response = await aiClient.complete(messages, {
-      temperature: 0.7,
-      maxTokens: 4096,
+    // Calculate actual credits used
+    const { credits: creditsUsed, cost: costPence } = calculateCredits(
+      provider,
+      model,
+      inputTokens,
+      outputTokens
+    );
+
+    // Record usage
+    await recordUsage({
+      user_id: user.id,
+      provider,
+      model,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      credits_deducted: creditsUsed,
+      cost_pence: costPence,
+      is_byok: shouldUseByok,
+      chat_id,
     });
 
-    // Calculate actual credits used
-    const inputTokens = response.usage?.inputTokens || 0;
-    const outputTokens = response.usage?.outputTokens || 0;
-    const totalTokens = inputTokens + outputTokens;
-    const creditsUsed = Math.ceil((totalTokens / 1000) * (CREDIT_RATES[selectedModel] || 5));
+    // Update key last used timestamp
+    if (shouldUseByok && keyId) {
+      await updateKeyLastUsed(keyId);
+    }
 
-    // Deduct credits
-    const { error: deductError } = await supabase
-      .rpc('deduct_credits', {
-        p_user_id: user.id,
-        p_amount: creditsUsed,
-        p_description: `AI request: ${selectedModel}`,
+    // Return response
+    if (stream) {
+      // For streaming, we need to proxy the stream
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream({
+        async start(controller) {
+          try {
+            if (provider === 'anthropic') {
+              // Anthropic streaming
+              const stream = response as any;
+              for await (const chunk of stream) {
+                if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+                  controller.enqueue(encoder.encode(chunk.delta.text));
+                }
+              }
+            } else {
+              // OpenAI/DeepSeek streaming
+              const stream = response as AsyncIterable<any>;
+              for await (const chunk of stream) {
+                const content = chunk.choices?.[0]?.delta?.content;
+                if (content) {
+                  controller.enqueue(encoder.encode(content));
+                }
+              }
+            }
+          } catch (error) {
+            controller.error(error);
+          } finally {
+            controller.close();
+          }
+        },
       });
 
-    if (deductError) {
-      console.error('Error deducting credits:', deductError);
-      // Continue anyway - credits will be reconciled later
+      return new Response(readable, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Credits-Used': creditsUsed.toString(),
+          'X-Byok': shouldUseByok.toString(),
+        },
+      });
     }
 
-    // Log usage for analytics
-    if (response.usage) {
-      await supabase
-        .from('ai_usage')
-        .insert({
-          user_id: user.id,
-          provider: selectedProvider,
-          model: selectedModel,
-          input_tokens: inputTokens,
-          output_tokens: outputTokens,
-          credits_deducted: creditsUsed,
-          cost_pence: 0, // Could calculate actual cost based on provider pricing
-        });
-    }
-
-    return NextResponse.json({
-      content: response.content,
-      provider: selectedProvider,
-      model: selectedModel,
-      usage: response.usage,
-      credits_used: creditsUsed,
+    // Non-streaming response
+    return NextResponse.json(response, {
+      headers: {
+        'X-Credits-Used': creditsUsed.toString(),
+        'X-Byok': shouldUseByok.toString(),
+      },
     });
   } catch (error) {
-    console.error('AI Completion Error:', error);
-    
+    console.error('Chat completions error:', error);
     return NextResponse.json(
-      { 
-        error: error instanceof Error ? error.message : 'AI request failed',
-        details: process.env.NODE_ENV === 'development' ? String(error) : undefined,
-      },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
+}
+
+// GET /api/chat/completions - Get available models for a provider
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const provider = searchParams.get('provider');
+
+  if (!provider || !PROVIDERS.includes(provider as Provider)) {
+    return NextResponse.json(
+      { error: 'Provider is required' },
+      { status: 400 }
+    );
+  }
+
+  // Return available models for each provider
+  const models: Record<string, string[]> = {
+    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
+    anthropic: ['claude-sonnet-4-20250514', 'claude-haiku-3-20250514', 'claude-opus-4-20240307'],
+    google: ['gemini-1.5-pro', 'gemini-1.5-flash'],
+    deepseek: ['deepseek-chat'],
+    openrouter: ['meta-llama/llama-3.1-405b', 'anthropic/claude-3.5-sonnet'],
+  };
+
+  return NextResponse.json({
+    provider,
+    models: models[provider] || [],
+  });
 }
