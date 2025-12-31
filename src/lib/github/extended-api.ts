@@ -3,7 +3,7 @@
 // Phase 3: Actions, Workflows
 
 import { createClient } from '@supabase/supabase-js';
-import { decryptApiKey } from '../billing/api-service';
+import { decryptApiKey } from '../billing/api-key-service';
 import { getGitHubAccessToken } from './api-service';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;

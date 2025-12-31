@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
     // Filter to code files if path not specified
     const filteredTree = path
       ? tree.filter((item) => item.path.startsWith(path))
-      : tree.filter((item) => isCodeFile(item.path) || item.type === 'dir');
+      : tree.filter((item) => isCodeFile(item.path) || item.type === 'tree');
 
     // Build directory structure
     if (!path) {

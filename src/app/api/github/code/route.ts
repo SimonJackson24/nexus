@@ -19,7 +19,8 @@ function encodeContent(content: string): string {
   return Buffer.from(content).toString('base64');
 }
 
-// GET /api/github/code - List branches
+// GET /api/github/code - List branches or get pending changes
+// Query params: repo, branch, status (for pending changes)
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
@@ -35,6 +36,29 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams;
+    const status = searchParams.get('status');
+
+    // If status is provided, return pending changes instead
+    if (status) {
+      const { data: pendingChanges, error } = await supabase
+        .from('github_pending_changes')
+        .select(`
+          *,
+          repo:github_repos(repo_full_name)
+        `)
+        .eq('user_id', user.id)
+        .eq('status', status)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return NextResponse.json({ error: 'Failed to fetch pending changes' }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        pending_changes: pendingChanges || [],
+      });
+    }
+
     const repo = searchParams.get('repo');
     const branch = searchParams.get('branch');
 
@@ -380,43 +404,4 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// GET /api/github/code/pending - List pending changes
-export async function GET(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const searchParams = request.nextUrl.searchParams;
-    const status = searchParams.get('status') || 'pending';
-
-    const { data: pendingChanges, error } = await supabase
-      .from('github_pending_changes')
-      .select(`
-        *,
-        repo:github_repos(repo_full_name)
-      `)
-      .eq('user_id', user.id)
-      .eq('status', status)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      return NextResponse.json({ error: 'Failed to fetch pending changes' }, { status: 500 });
-    }
-
-    return NextResponse.json({
-      pending_changes: pendingChanges || [],
-    });
-  } catch (error) {
-    console.error('Get pending changes error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}

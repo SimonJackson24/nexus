@@ -7,6 +7,9 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 // Admin client for user management
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
+// Client for regular auth operations
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
 // POST /api/auth/change-password - Change password (clears force_password_change flag)
 export async function POST(request: NextRequest) {
   try {
@@ -33,14 +36,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the password via admin API (needed to clear the flag)
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUser(
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
       user.id,
-      {
-        password: new_password,
-        user_metadata: {
-          // Remove the force_password_change flag
-        },
-      }
+      { password: new_password }
     );
 
     if (updateError) {

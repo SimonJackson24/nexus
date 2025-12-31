@@ -6,7 +6,7 @@ import {
   MessageSquare, Users, Key, CreditCard, Check, ArrowRight,
   ChevronRight, Star, Infinity, Layers, Link2, Target,
   TrendingUp, Lock, Globe, Cpu, Bot, FileText, BarChart,
-  Play, Menu, X, ExternalLink, Terminal, Search
+  Play, Menu, X as XIcon, ExternalLink, Terminal, Search
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { User } from '@supabase/supabase-js';
@@ -825,7 +825,7 @@ export default function Homepage() {
                       {feature.included ? (
                         <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
                       ) : (
-                        <X className="w-4 h-4 text-nexus-muted flex-shrink-0" />
+                        <XIcon className="w-4 h-4 text-nexus-muted flex-shrink-0" />
                       )}
                       <span className={feature.included ? 'text-nexus-text' : 'text-nexus-muted'}>
                         {feature.name}
@@ -996,7 +996,7 @@ export default function Homepage() {
                 onClick={() => setShowAuthModal(false)}
                 className="p-2 hover:bg-nexus-hover rounded-lg"
               >
-                <X className="w-5 h-5" />
+                <XIcon className="w-5 h-5" />
               </button>
             </div>
 

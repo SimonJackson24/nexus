@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
               }
             } else {
               // OpenAI/DeepSeek streaming
-              const stream = response as AsyncIterable<any>;
+              const stream = response as unknown as AsyncIterable<any>;
               for await (const chunk of stream) {
                 const content = chunk.choices?.[0]?.delta?.content;
                 if (content) {

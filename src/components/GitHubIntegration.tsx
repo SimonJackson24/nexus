@@ -792,10 +792,12 @@ export default function GitHubIntegration({ onClose }: { onClose: () => void }) 
                             onClick={() => {
                               resetCreateModal();
                               // Select the newly created repo
-                              const newRepo = connection.repos?.find(
-                                r => r.full_name === createResult.repo?.full_name
-                              );
-                              if (newRepo) handleSelectRepo(newRepo);
+                              if (connection?.repos) {
+                                const newRepo = connection.repos.find(
+                                  r => r.full_name === createResult.repo?.full_name
+                                );
+                                if (newRepo) handleSelectRepo(newRepo);
+                              }
                             }}
                             className="block w-full mt-4 p-3 bg-primary-600/20 text-primary-400 rounded-lg"
                           >

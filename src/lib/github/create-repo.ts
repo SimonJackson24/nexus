@@ -182,7 +182,13 @@ export async function commitInitialFiles(
     // We need to create the first commit with all files
 
     // Create a combined tree with all files
-    const blobs: { path: string; mode: string; type: string; content: string }[] = [];
+    interface TreeItem {
+      path: string;
+      mode: string;
+      type: string;
+      sha?: string;
+    }
+    const blobs: TreeItem[] = [];
 
     for (const file of files) {
       const base64Content = Buffer.from(file.content).toString('base64');
@@ -305,7 +311,7 @@ export async function commitInitialFiles(
     return { success: true, files_committed: filesCommitted };
   } catch (error) {
     console.error('Commit files error:', error);
-    return { success: false, files_committed, error: String(error) };
+    return { success: false, files_committed: filesCommitted, error: String(error) };
   }
 }
 
