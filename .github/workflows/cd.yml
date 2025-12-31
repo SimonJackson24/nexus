@@ -40,8 +40,11 @@ jobs:
           # Convert username to lowercase for ghcr.io
           REGISTRY="ghcr.io/${USERNAME,,}"
           IMAGE_NAME="nexus"
-          # Build the image
+          # Build the image with Supabase environment variables
           docker build -t $REGISTRY/$IMAGE_NAME:latest \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }} \
+            --build-arg SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }} \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }} \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
             .
           # Login to GHCR
