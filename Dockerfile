@@ -19,13 +19,15 @@ RUN npm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copy .env.build for build-time environment variables
+# Define build arguments for Supabase (can be passed via --build-arg or .env.build)
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG SUPABASE_SERVICE_ROLE_KEY
+
+# Copy .env.build for local builds (will override ARG values)
 COPY .env.build .env.build
 
-# Source environment variables from .env.build
-RUN set -a && . .env.build
-
-# Set environment variables
+# Set environment variables - will use .env.build values if file was copied
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 ENV SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
