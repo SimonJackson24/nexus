@@ -102,6 +102,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           script: |
+            set -e
             echo "=========================================="
             echo "Nexus Deployment Started"
             echo "Time: $(date)"
@@ -114,9 +115,11 @@ jobs:
             # Create .env file if it doesn't exist
             if [ ! -f .env ]; then
               echo "📝 Creating .env file..."
-              cat > .env << 'ENVEOF'
-              # Supabase Configuration
               JWT_SECRET=$(openssl rand -base64 32)
+              NEXUS_SECRET_KEY=$(openssl rand -base64 32)
+              cat > .env << ENDOFFILE
+              # Supabase Configuration
+              JWT_SECRET=${JWT_SECRET}
               NEXT_PUBLIC_SUPABASE_URL=http://kong:8000
               NEXT_PUBLIC_SUPABASE_ANON_KEY=change-me-after-first-run
               SUPABASE_SERVICE_ROLE_KEY=change-me-after-first-run
@@ -130,14 +133,14 @@ jobs:
               MINIMAX_API_KEY=
               
               # Application
-              NEXUS_SECRET_KEY=$(openssl rand -base64 32)
+              NEXUS_SECRET_KEY=${NEXUS_SECRET_KEY}
               
               # Email (optional)
               SMTP_HOST=
               SMTP_PORT=
               SMTP_USER=
               SMTP_PASS=
-              ENVEOF
+              ENDOFFILE
               echo "✅ .env file created with generated secrets"
             else
               echo "ℹ .env file already exists, preserving existing values"
@@ -179,26 +182,7 @@ jobs:
               echo "⏳ Waiting for GoTrue to be ready..."
               sleep 5
               
-              # Extract actual Supabase keys from gotrue container
-              echo "🔑 Extracting Supabase keys from GoTrue..."
-              GOTRUE_LOGS=$(docker logs nexus-gotrue 2>&1)
-              
-              # Try to extract keys from logs (they may be in the output)
-              ANON_KEY=$(echo "$GOTRUE_LOGS" | grep -oP 'ANON_KEY="\K[^"]+' | head -1 || echo "")
-              SERVICE_KEY=$(echo "$GOTRUE_LOGS" | grep -oP 'SERVICE_KEY="\K[^"]+' | head -1 || echo "")
-              
-              if [ -z "$ANON_KEY" ]; then
-                echo "⚠️ Could not extract keys from logs, using defaults"
-                # Use gotrue admin API to get keys
-                ANON_KEY="anon_key_placeholder"
-                SERVICE_KEY="service_key_placeholder"
-              fi
-              
-              # Update .env with actual keys
-              sed -i "s|NEXT_PUBLIC_SUPABASE_ANON_KEY=.*|NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY|" .env
-              sed -i "s|SUPABASE_SERVICE_ROLE_KEY=.*|SUPABASE_SERVICE_ROLE_KEY=$SERVICE_KEY|" .env
-              
-              echo "✅ Supabase keys configured"
+              echo "✅ Supabase services started"
               
               # Run database schemas
               echo "📋 Initializing database schema..."
@@ -231,14 +215,6 @@ jobs:
             # Wait for healthy
             echo "⏳ Waiting for container to be healthy..."
             sleep 30
-            
-            # Get actual Supabase keys from running gotrue if first deploy
-            if [ "$FIRST_DEPLOY" = true ]; then
-              echo "🔑 Getting final Supabase keys..."
-              sleep 10
-              # Keys are now available from the running container
-              # They can be retrieved via the admin API or container logs
-            fi
             
             # Health check on configured port 3011
             HEALTH=$(curl -s http://localhost:3011/api/health || echo "failed")
