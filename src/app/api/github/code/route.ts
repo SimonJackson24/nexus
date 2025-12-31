@@ -335,8 +335,8 @@ export async function PATCH(request: NextRequest) {
       const [owner, repoName] = repo.repo_full_name.split('/');
 
       // Create PR using the extended API
-      const { createPullRequest } = await import('@/lib/github/extended-api');
-      const pr = await createPullRequest(user.id, owner, repoName, {
+      const { createPR } = await import('@/lib/github/extended-api');
+      const pr = await createPR(user.id, owner, repoName, {
         title: pr_title || `AI: ${pendingChange.change_summary}`,
         body: pr_body || `AI-generated changes.\n\n${pendingChange.change_summary}`,
         head: pr_head || pendingChange.branch_name,
@@ -381,13 +381,7 @@ export async function PATCH(request: NextRequest) {
 }
 
 // GET /api/github/code/pending - List pending changes
-export async function PATCH(request: NextRequest) {
-  // This is actually a GET handler below
-  return NextResponse.json({ error: 'Use GET for pending changes' }, { status: 400 });
-}
-
-// Add GET handler for pending changes at the top level
-export async function PUT(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
