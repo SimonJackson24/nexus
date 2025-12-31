@@ -93,14 +93,14 @@ jobs:
 
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          USERNAME: ${{ github.actor }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          env:
-            GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-            USERNAME: ${{ github.actor }}
           script: |
             echo "=========================================="
             echo "Nexus Deployment Started"
