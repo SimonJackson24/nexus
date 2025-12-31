@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
-import { getAIProvider } from '@/lib/ai/clients';
+import { getAIClient } from '@/lib/ai/clients';
 import { ChatCompletionMessageParam } from 'openai/resources';
 import type { Message } from '@/lib/types';
 
@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
     );
 
     // Get AI provider and create stream
-    const aiProvider = getAIProvider(provider, model);
-    const stream = await aiProvider.createCompletion(formattedMessages);
+    const aiProvider = getAIClient(provider, model);
+    const stream = await aiProvider.stream(formattedMessages);
 
     // Calculate and deduct credits (simplified: 1 credit per message)
     const creditsToDeduct = Math.max(1, Math.ceil(messages.length / 2));

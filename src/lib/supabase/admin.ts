@@ -1,27 +1,27 @@
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from './types';
 
-// Lazy-initialized admin client (for server-side use only)
-let adminClient: ReturnType<typeof createClient> | null = null;
+// Lazy-initialized typed Supabase client for admin operations
+let adminClient: ReturnType<typeof createClient<Database>> | null = null;
 
-export function getSupabaseAdmin(): ReturnType<typeof createClient> {
+export function getSupabaseAdmin(): ReturnType<typeof createClient<Database>> {
   if (!adminClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
     
     if (!supabaseUrl || !supabaseServiceKey) {
-      // Return a placeholder client that will fail at runtime if used without proper env vars
       console.warn('Supabase admin client created with missing environment variables');
     }
     
-    adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    adminClient = createClient<Database>(supabaseUrl, supabaseServiceKey);
   }
   return adminClient;
 }
 
-// Lazy-initialized service client (for server-side use with anon key)
-let serviceClient: ReturnType<typeof createClient> | null = null;
+// Lazy-initialized typed Supabase client for service operations (anon key)
+let serviceClient: ReturnType<typeof createClient<Database>> | null = null;
 
-export function getSupabaseService(): ReturnType<typeof createClient> {
+export function getSupabaseService(): ReturnType<typeof createClient<Database>> {
   if (!serviceClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -30,7 +30,7 @@ export function getSupabaseService(): ReturnType<typeof createClient> {
       console.warn('Supabase service client created with missing environment variables');
     }
     
-    serviceClient = createClient(supabaseUrl, supabaseAnonKey);
+    serviceClient = createClient<Database>(supabaseUrl, supabaseAnonKey);
   }
   return serviceClient;
 }

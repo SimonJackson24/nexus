@@ -3,16 +3,17 @@
 // Phase 3: Actions, Workflows
 
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/supabase/types';
 import { getGitHubAccessToken } from './api-service';
 
-// Lazy-initialized Supabase client
-let supabaseClient: ReturnType<typeof createClient> | null = null;
+// Lazy-initialized typed Supabase client
+let supabaseClient: ReturnType<typeof createClient<Database>> | null = null;
 
-function getSupabase(): ReturnType<typeof createClient> {
+function getSupabase(): ReturnType<typeof createClient<Database>> {
   if (!supabaseClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-    supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+    supabaseClient = createClient<Database>(supabaseUrl, supabaseServiceKey);
   }
   return supabaseClient;
 }
