@@ -19,10 +19,18 @@ RUN npm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Set placeholder environment variables for build
-# These will be overwritten at runtime
-ENV NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
-ENV SUPABASE_SERVICE_ROLE_KEY=placeholder_key
+# Copy .env.build for build-time environment variables
+# Create .env.build from ARG or use example
+COPY .env.build.example .env.build.example
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG SUPABASE_SERVICE_ROLE_KEY
+
+# Set environment variables from args or use values from .env.build
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+
+# If args not provided, use placeholder (will fail at runtime without real values)
+# This allows build to succeed but runtime will need proper env vars
 
 COPY --from=deps /app/node_modules ./node_modules
 
