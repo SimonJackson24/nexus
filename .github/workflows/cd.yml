@@ -118,6 +118,8 @@ jobs:
               sed -i "s/\"8100:8000\"/\"$NEW_PORT:8000\"/g" docker-compose.yml
               sed -i "s/\"8101:8001\"/\"$((NEW_PORT + 1)):8001\"/g" docker-compose.yml
             fi
+            # Save the Nexus port for health check
+            NEXUS_PORT=${NEW_PORT:-3011}
             # Pull new image
             echo "🐳 Pulling Docker image..."
             docker compose pull nexus
@@ -147,7 +149,7 @@ jobs:
             sleep 30
 
             # Health check
-            HEALTH=$(curl -s http://localhost:3011/api/health || echo "failed")
+            HEALTH=$(curl -s http://localhost:${NEXUS_PORT:-3011}/api/health || echo "failed")
             if echo "$HEALTH" | grep -q "healthy"; then
               echo "✅ Deployment successful!"
             else
