@@ -20,17 +20,15 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy .env.build for build-time environment variables
-# Create .env.build from ARG or use example
-COPY .env.build.example .env.build.example
-ARG NEXT_PUBLIC_SUPABASE_URL
-ARG SUPABASE_SERVICE_ROLE_KEY
+COPY .env.build .env.build
 
-# Set environment variables from args or use values from .env.build
+# Source environment variables from .env.build
+RUN set -a && . .env.build
+
+# Set environment variables
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 ENV SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-
-# If args not provided, use placeholder (will fail at runtime without real values)
-# This allows build to succeed but runtime will need proper env vars
 
 COPY --from=deps /app/node_modules ./node_modules
 
