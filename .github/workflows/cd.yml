@@ -52,6 +52,8 @@ jobs:
           docker tag $REGISTRY/$IMAGE_NAME:latest $REGISTRY/$IMAGE_NAME:${{ github.sha }}
           docker push $REGISTRY/$IMAGE_NAME:${{ github.sha }}
           echo "image_ref=$REGISTRY/$IMAGE_NAME:latest" >> $GITHUB_OUTPUT
+          echo "registry=$REGISTRY" >> $GITHUB_OUTPUT
+
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -67,105 +69,33 @@ jobs:
             echo "=========================================="
             # Navigate to app directory
             cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
-            # Pull latest changes
-            echo "📦 Pulling latest code..."
-            git fetch origin main
-            git checkout main
-            git stash || true
-            git pull origin main || git reset --hard origin/main
             # Login to container registry
             echo "🔐 Logging into container registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            # Function to find free port
-            find_free_port() {
-              local base_port=$1
-              local port=$base_port
-              while ss -tlnp | grep -q ":$port "; do
-                port=$((port + 1))
-              done
-              echo $port
-            }
-            
-            # Check and adjust ports if needed
-            echo "🔍 Checking ports..."
-            
-            # PostgreSQL: 5432 → find free
-            if ss -tlnp | grep -q ':5432 '; then
-              NEW_PORT=$(find_free_port 5432)
-              echo "Port 5432 in use, changing to $NEW_PORT..."
-              sed -i "s/\"5432:5432\"/\"$NEW_PORT:5432\"/g" docker-compose.yml
-              sed -i "s/@postgres:5432/@postgres:$NEW_PORT/g" docker-compose.yml
-            fi
-            
-            # Redis: 6379 → find free
-            if ss -tlnp | grep -q ':6379 '; then
-              NEW_PORT=$(find_free_port 6379)
-              echo "Port 6379 in use, changing to $NEW_PORT..."
-              sed -i "s/\"6379:6379\"/\"$NEW_PORT:6379\"/g" docker-compose.yml
-            fi
-            
-            # Nexus App: 3011 → find free
-            if ss -tlnp | grep -q ':3011 '; then
-              NEW_PORT=$(find_free_port 3011)
-              echo "Port 3011 in use, changing to $NEW_PORT..."
-              sed -i "s/\"3011:3000\"/\"$NEW_PORT:3000\"/g" docker-compose.yml
-            fi
-            
-            # Kong: 8100 → find free
-            if ss -tlnp | grep -q ':8100 '; then
-              NEW_PORT=$(find_free_port 8100)
-              echo "Port 8100 in use, changing to $NEW_PORT..."
-              sed -i "s/\"8100:8000\"/\"$NEW_PORT:8000\"/g" docker-compose.yml
-              sed -i "s/\"8101:8001\"/\"$((NEW_PORT + 1)):8001\"/g" docker-compose.yml
-            fi
-            # Save the Nexus port for health check
-            NEXUS_PORT=${NEW_PORT:-3011}
-            # Pull new image
+            # Pull the pre-built image from CI
             echo "🐳 Pulling Docker image..."
             docker compose pull nexus
-            # Get Supabase keys from running containers
-            echo "🔑 Extracting Supabase keys..."
-            SUPABASE_ANON_KEY=$(docker exec supabase-db env 2>/dev/null | grep ANON_KEY | cut -d'=' -f2 || echo "")
-            SUPABASE_SERVICE_ROLE=$(docker exec supabase-db env 2>/dev/null | grep SERVICE_ROLE_KEY | cut -d'=' -f2 || echo "")
-            
-            # Create .env file with all required variables
-            echo "📝 Creating .env file..."
-            cat > .env << ENVEOF
-            NEXT_PUBLIC_SUPABASE_URL=http://kong:8000
-            NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-${{ secrets.SUPABASE_ANON_KEY }}}
-            SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE:-${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}}
-            NEXUS_SECRET_KEY=${{ secrets.NEXUS_SECRET_KEY }}
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            MINIMAX_API_KEY=${{ secrets.MINIMAX_API_KEY }}
-            ENVEOF
-
-            # Restart services with new environment
+            # Restart services with new image
             echo "🔄 Restarting services..."
-            docker compose up -d --force-recreate
-
+            docker compose up -d --no-build
             # Wait for healthy
             echo "⏳ Waiting for container to be healthy..."
-            sleep 30
-
-            # Health check
-            HEALTH=$(curl -s http://localhost:${NEXUS_PORT:-3011}/api/health || echo "failed")
+            sleep 20
+            # Health check on configured port 3011
+            HEALTH=$(curl -s http://localhost:3011/api/health || echo "failed")
             if echo "$HEALTH" | grep -q "healthy"; then
               echo "✅ Deployment successful!"
             else
               echo "❌ Health check failed, checking logs..."
-              docker compose logs --tail=50 nexus
+              docker compose logs --tail=30 nexus
               exit 1
             fi
-
             # Cleanup old images
             echo "🧹 Cleaning up old Docker images..."
             docker image prune -f
-
             # Log deployment
             echo "📝 Logging deployment..."
             echo "${{ github.sha }} - $(date)" >> deployment.log
-
             echo "=========================================="
             echo "Deployment completed at $(date)"
             echo "=========================================="
