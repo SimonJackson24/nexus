@@ -2,14 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { encryptApiKey, validateApiKey, maskApiKey } from '@/lib/billing/api-key-service';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Lazy initialization of Supabase client
+function getSupabase() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Supabase environment variables not configured');
+  }
+  
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 // GET /api/billing/api-keys - List user's API keys
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabase();
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -61,6 +69,7 @@ export async function GET(request: NextRequest) {
 // POST /api/billing/api-keys - Add a new API key
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabase();
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -132,6 +141,7 @@ export async function POST(request: NextRequest) {
 // DELETE /api/billing/api-keys - Remove an API key
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = getSupabase();
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -187,6 +197,7 @@ export async function DELETE(request: NextRequest) {
 // PATCH /api/billing/api-keys - Update key settings (activate/deactivate)
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = getSupabase();
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

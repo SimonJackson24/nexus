@@ -18,6 +18,13 @@ RUN npm install
 # Stage 2: Builder
 FROM node:20-alpine AS builder
 WORKDIR /app
+
+# Build arguments for environment variables
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG SUPABASE_SERVICE_ROLE_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy all config files first
