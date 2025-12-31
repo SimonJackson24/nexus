@@ -26,10 +26,12 @@ services:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_SUPABASE_URL: http://kong:8000
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: anon-key
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-your-anon-key-here}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-your-service-role-key}
+      NEXUS_SECRET_KEY: ${NEXUS_SECRET_KEY:-nexus-secret-key-change-in-production}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-placeholder}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-placeholder}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-placeholder}
     depends_on:
       - kong
     networks:

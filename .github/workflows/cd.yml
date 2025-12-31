@@ -135,6 +135,16 @@ jobs:
 
             # Restart services
             echo "🔄 Restarting services..."
+            
+            # Set environment variables for the container
+            export NEXT_PUBLIC_SUPABASE_URL="http://kong:8000"
+            export NEXT_PUBLIC_SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY }}"
+            export SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+            export NEXUS_SECRET_KEY="${{ secrets.NEXUS_SECRET_KEY }}"
+            export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            export ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            export MINIMAX_API_KEY="${{ secrets.MINIMAX_API_KEY }}"
+            
             docker compose up -d --force-recreate
 
             # Wait for healthy
