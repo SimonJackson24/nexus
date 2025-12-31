@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseService } from '@/lib/supabase/admin';
 import { listUserRepos, getGitHubAccessToken, syncUserRepos } from '@/lib/github/api-service';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // GET /api/github/repos - List user's repositories
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -119,6 +116,8 @@ export async function GET(request: NextRequest) {
 // DELETE /api/github/repos - Disconnect GitHub
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

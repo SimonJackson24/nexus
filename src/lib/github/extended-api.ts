@@ -3,13 +3,19 @@
 // Phase 3: Actions, Workflows
 
 import { createClient } from '@supabase/supabase-js';
-import { decryptApiKey } from '../billing/api-key-service';
 import { getGitHubAccessToken } from './api-service';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Lazy-initialized Supabase client
+let supabaseClient: ReturnType<typeof createClient> | null = null;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+function getSupabase(): ReturnType<typeof createClient> {
+  if (!supabaseClient) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+  }
+  return supabaseClient;
+}
 
 const GITHUB_API = 'https://api.github.com';
 

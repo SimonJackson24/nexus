@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Helper function to create admin client lazily (avoids build-time errors)
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
-// Admin client for user management
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-// Client for regular auth operations
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Helper function to create regular client lazily
+function getSupabase() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 // POST /api/auth/change-password - Change password (clears force_password_change flag)
 export async function POST(request: NextRequest) {
@@ -19,6 +24,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1];
+    const supabase = getSupabase();
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
@@ -36,6 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the password via admin API (needed to clear the flag)
+    const supabaseAdmin = getSupabaseAdmin();
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
       user.id,
       { password: new_password }
@@ -71,6 +78,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1];
+    const supabase = getSupabase();
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {

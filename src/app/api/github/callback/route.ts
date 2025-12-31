@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseService } from '@/lib/supabase/admin';
 import { encryptApiKey } from '@/lib/billing/api-key-service';
 import { getGitHubUser } from '@/lib/github/api-service';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // GitHub OAuth configuration
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
@@ -47,6 +42,8 @@ export async function GET(request: NextRequest) {
 // OAuth callback handler
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const body = await request.json();
     const { code, state } = body;
 

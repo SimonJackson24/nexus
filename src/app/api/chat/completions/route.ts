@@ -1,28 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
-import { Anthropic } from '@anthropic-ai/sdk';
-import { decryptApiKey } from '@/lib/billing/api-key-service';
-import { 
-  checkUsageEligibility, 
-  calculateCredits, 
-  recordUsage,
-  getUserApiKeys,
-  updateKeyLastUsed,
-  markKeyInvalid,
-  getUserSubscription 
-} from '@/lib/billing/usage-service';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { getAIProvider } from '@/lib/ai/clients';
+import { ChatCompletionMessageParam } from 'openai/resources';
+import type { Message } from '@/lib/types';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-// Supported providers
-const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek', 'openrouter'] as const;
-type Provider = typeof PROVIDERS[number];
-
-// POST /api/chat/completions - Handle AI chat completions with BYOK support
+// POST /api/chat/completions - Handle chat completions with credits system
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
@@ -31,313 +13,102 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
+    const supabaseAdmin = getSupabaseAdmin();
+    
+    // Get user from token
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Get user credits from database
+    const { data: userCredits } = await supabaseAdmin
+      .from('user_credits')
+      .select('credits')
+      .eq('user_id', user.id)
+      .single();
+
+    const availableCredits = userCredits?.credits ?? 0;
+    if (availableCredits <= 0) {
+      return NextResponse.json(
+        { error: 'Insufficient credits. Please purchase more credits to continue.' },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
-    const { 
-      messages, 
-      model, 
-      provider = 'openai', 
-      temperature, 
-      max_tokens, 
-      stream = false,
-      chat_id,
-      use_byok = false,
-    } = body;
+    const { messages, model, provider } = body as {
+      messages: Message[];
+      model: string;
+      provider: string;
+    };
 
-    if (!messages || !model) {
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
-        { error: 'Messages and model are required' },
+        { error: 'Messages are required and must be a non-empty array' },
         { status: 400 }
       );
     }
 
-    if (!PROVIDERS.includes(provider as Provider)) {
-      return NextResponse.json(
-        { error: `Unsupported provider: ${provider}` },
-        { status: 400 }
-      );
-    }
-
-    // Get user's subscription
-    const subscription = await getUserSubscription(user.id);
-    
-    // Determine if we should use BYOK
-    const shouldUseByok = use_byok || 
-      (subscription?.subscription_mode === 'byok') ||
-      (!subscription?.credits_balance || subscription.credits_balance <= 0);
-
-    let apiKey: string | undefined;
-    let keyId: string | undefined;
-
-    if (shouldUseByok) {
-      // Get user's API keys for this provider
-      const keys = await getUserApiKeys(user.id, provider);
-      
-      if (keys.length === 0) {
-        return NextResponse.json(
-          { 
-            error: 'No API key found for this provider',
-            requires_byok_setup: true,
-            provider,
-          },
-          { status: 402 }
-        );
-      }
-
-      // Use the first valid key
-      const userKey = keys[0];
-      try {
-        apiKey = decryptApiKey(userKey.encrypted_key);
-        keyId = userKey.id;
-      } catch (error) {
-        console.error('Error decrypting API key:', error);
-        return NextResponse.json(
-          { error: 'Failed to decrypt API key' },
-          { status: 500 }
-        );
-      }
-    } else {
-      // Use platform's API key (from environment)
-      switch (provider) {
-        case 'openai':
-          apiKey = process.env.OPENAI_API_KEY;
-          break;
-        case 'anthropic':
-          apiKey = process.env.ANTHROPIC_API_KEY;
-          break;
-        // Add other providers as needed
-      }
-    }
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'API key not configured' },
-        { status: 500 }
-      );
-    }
-
-    // Calculate estimated credits (will be adjusted based on actual usage)
-    const estimatedCredits = calculateCredits(provider, model, 0, 0).credits;
-
-    // Check eligibility (skip for BYOK)
-    if (!shouldUseByok) {
-      const eligibility = await checkUsageEligibility(user.id, provider, model, estimatedCredits);
-      
-      if (!eligibility.allowed) {
-        return NextResponse.json(
-          { 
-            error: eligibility.reason,
-            credits_remaining: eligibility.credits_remaining,
-            requires_byok: eligibility.requires_byok,
-          },
-          { status: 402 }
-        );
-      }
-    }
-
-    // Make the API call
-    let response;
-    let inputTokens = 0;
-    let outputTokens = 0;
-
-    try {
-      switch (provider) {
-        case 'openai': {
-          const client = new OpenAI({ apiKey });
-          response = await client.chat.completions.create({
-            model,
-            messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
-            temperature,
-            max_tokens,
-            stream,
-          });
-
-          if (!stream) {
-            const chatResponse = response as OpenAI.Chat.ChatCompletion;
-            inputTokens = chatResponse.usage?.prompt_tokens || 0;
-            outputTokens = chatResponse.usage?.completion_tokens || 0;
-          }
-          break;
-        }
-
-        case 'anthropic': {
-          const client = new Anthropic({ apiKey });
-          const systemMessage = messages.find((m: any) => m.role === 'system');
-          const userMessages = messages.filter((m: any) => m.role !== 'system');
-
-          response = await client.messages.create({
-            model,
-            max_tokens: max_tokens || 4096,
-            temperature,
-            system: systemMessage?.content,
-            messages: userMessages.map((m: any) => ({
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-            })),
-            stream,
-          });
-
-          if (!stream) {
-            inputTokens = response.usage.input_tokens;
-            outputTokens = response.usage.output_tokens;
-          }
-          break;
-        }
-
-        case 'deepseek': {
-          const client = new OpenAI({
-            apiKey,
-            baseURL: 'https://api.deepseek.com',
-          });
-          response = await client.chat.completions.create({
-            model,
-            messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
-            temperature,
-            max_tokens,
-            stream,
-          });
-
-          if (!stream) {
-            const chatResponse = response as OpenAI.Chat.ChatCompletion;
-            inputTokens = chatResponse.usage?.prompt_tokens || 0;
-            outputTokens = chatResponse.usage?.completion_tokens || 0;
-          }
-          break;
-        }
-
-        default:
-          return NextResponse.json(
-            { error: `Provider ${provider} not yet implemented` },
-            { status: 501 }
-          );
-      }
-    } catch (apiError: any) {
-      // If BYOK key failed, mark it as invalid
-      if (shouldUseByok && keyId) {
-        await markKeyInvalid(keyId, apiError.message || 'API call failed');
-      }
-
-      return NextResponse.json(
-        { 
-          error: apiError.message || 'AI API error',
-          provider_error: true,
-        },
-        { status: apiError.status || 500 }
-      );
-    }
-
-    // Calculate actual credits used
-    const { credits: creditsUsed, cost: costPence } = calculateCredits(
-      provider,
-      model,
-      inputTokens,
-      outputTokens
+    // Map messages to OpenAI format
+    const formattedMessages: ChatCompletionMessageParam[] = messages.map(
+      (msg: Message) => ({
+        role: msg.role as 'system' | 'user' | 'assistant',
+        content: msg.content,
+      })
     );
 
-    // Record usage
-    await recordUsage({
-      user_id: user.id,
-      provider,
-      model,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      credits_deducted: creditsUsed,
-      cost_pence: costPence,
-      is_byok: shouldUseByok,
-      chat_id,
+    // Get AI provider and create stream
+    const aiProvider = getAIProvider(provider, model);
+    const stream = await aiProvider.createCompletion(formattedMessages);
+
+    // Calculate and deduct credits (simplified: 1 credit per message)
+    const creditsToDeduct = Math.max(1, Math.ceil(messages.length / 2));
+    
+    await supabaseAdmin
+      .from('user_credits')
+      .update({ credits: availableCredits - creditsToDeduct })
+      .eq('user_id', user.id);
+
+    // Create a ReadableStream for the response
+    const readableStream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        
+        for await (const chunk of stream as AsyncIterable<any>) {
+          const content = chunk.choices?.[0]?.delta?.content || '';
+          if (content) {
+            controller.enqueue(encoder.encode(content));
+          }
+        }
+        controller.close();
+      },
     });
 
-    // Update key last used timestamp
-    if (shouldUseByok && keyId) {
-      await updateKeyLastUsed(keyId);
-    }
-
-    // Return response
-    if (stream) {
-      // For streaming, we need to proxy the stream
-      const encoder = new TextEncoder();
-      const readable = new ReadableStream({
-        async start(controller) {
-          try {
-            if (provider === 'anthropic') {
-              // Anthropic streaming
-              const stream = response as any;
-              for await (const chunk of stream) {
-                if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-                  controller.enqueue(encoder.encode(chunk.delta.text));
-                }
-              }
-            } else {
-              // OpenAI/DeepSeek streaming
-              const stream = response as unknown as AsyncIterable<any>;
-              for await (const chunk of stream) {
-                const content = chunk.choices?.[0]?.delta?.content;
-                if (content) {
-                  controller.enqueue(encoder.encode(content));
-                }
-              }
-            }
-          } catch (error) {
-            controller.error(error);
-          } finally {
-            controller.close();
-          }
-        },
-      });
-
-      return new Response(readable, {
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'X-Credits-Used': creditsUsed.toString(),
-          'X-Byok': shouldUseByok.toString(),
-        },
-      });
-    }
-
-    // Non-streaming response
-    return NextResponse.json(response, {
+    return new NextResponse(readableStream, {
       headers: {
-        'X-Credits-Used': creditsUsed.toString(),
-        'X-Byok': shouldUseByok.toString(),
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Credits-Deducted': creditsToDeduct.toString(),
+        'X-Credits-Remaining': (availableCredits - creditsToDeduct).toString(),
       },
     });
   } catch (error) {
-    console.error('Chat completions error:', error);
+    console.error('Chat completion error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to generate response' },
       { status: 500 }
     );
   }
 }
 
-// GET /api/chat/completions - Get available models for a provider
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const provider = searchParams.get('provider');
-
-  if (!provider || !PROVIDERS.includes(provider as Provider)) {
-    return NextResponse.json(
-      { error: 'Provider is required' },
-      { status: 400 }
-    );
-  }
-
-  // Return available models for each provider
-  const models: Record<string, string[]> = {
-    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
-    anthropic: ['claude-sonnet-4-20250514', 'claude-haiku-3-20250514', 'claude-opus-4-20240307'],
-    google: ['gemini-1.5-pro', 'gemini-1.5-flash'],
-    deepseek: ['deepseek-chat'],
-    openrouter: ['meta-llama/llama-3.1-405b', 'anthropic/claude-3.5-sonnet'],
-  };
-
+// GET /api/chat/completions - Get available models and providers
+export async function GET() {
   return NextResponse.json({
-    provider,
-    models: models[provider] || [],
+    providers: ['openai', 'anthropic', 'minimax'],
+    models: {
+      openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+      anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-3-20250514'],
+      minimax: ['abab6.5s-chat', 'abab6.5-chat', 'abab6-chat'],
+    },
   });
 }

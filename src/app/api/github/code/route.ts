@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseService } from '@/lib/supabase/admin';
 import {
   listBranches,
   getBranch,
@@ -8,11 +8,6 @@ import {
   deleteFile,
   listWorkflowRuns,
 } from '@/lib/github/extended-api';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Helper to encode content to base64
 function encodeContent(content: string): string {
@@ -23,6 +18,8 @@ function encodeContent(content: string): string {
 // Query params: repo, branch, status (for pending changes)
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -106,6 +103,8 @@ export async function GET(request: NextRequest) {
 // POST /api/github/code - Create branch, update files, create PR
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -298,6 +297,8 @@ export async function POST(request: NextRequest) {
 // PATCH /api/github/code - Approve or reject pending changes
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

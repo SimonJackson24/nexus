@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { getSupabaseService } from '@/lib/supabase/admin';
 
 // GET /api/billing/tiers - Get available subscription tiers
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const { searchParams } = new URL(request.url);
     const includeHidden = searchParams.get('include_hidden') === 'true';
 

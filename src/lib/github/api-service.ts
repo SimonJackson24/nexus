@@ -2,7 +2,7 @@
 // Handles all interactions with GitHub API
 
 import { createClient } from '@supabase/supabase-js';
-import { decryptApiKey, encryptApiKey } from '../billing/api-key-service';
+import { decryptApiKey } from '../billing/api-key-service';
 import {
   GitHubUser,
   GitHubRepository,
@@ -14,10 +14,17 @@ import {
   getLanguageFromExtension,
 } from './types';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Lazy-initialized Supabase client
+let supabaseClient: ReturnType<typeof createClient> | null = null;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+function getSupabase(): ReturnType<typeof createClient> {
+  if (!supabaseClient) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
+  }
+  return supabaseClient;
+}
 
 // GitHub API base URL
 const GITHUB_API = 'https://api.github.com';
@@ -29,6 +36,7 @@ const GITHUB_RAW = 'https://raw.githubusercontent.com';
 
 // Get decrypted access token for a user
 export async function getGitHubAccessToken(userId: string): Promise<string | null> {
+  const supabase = getSupabase();
   const { data: connection, error } = await supabase
     .from('github_connections')
     .select('*')
@@ -314,6 +322,7 @@ export async function searchCode(
 
 // Sync user repositories to database
 export async function syncUserRepos(userId: string, connectionId: string): Promise<number> {
+  const supabase = getSupabase();
   const accessToken = await getGitHubAccessToken(userId);
   if (!accessToken) {
     throw new Error('No valid GitHub access token');

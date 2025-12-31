@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseService } from '@/lib/supabase/admin';
 import {
   listWorkflows,
   listWorkflowRuns,
@@ -8,14 +8,11 @@ import {
   rerunWorkflow,
 } from '@/lib/github/extended-api';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
 // GET /api/github/actions - List workflows and runs
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -98,6 +95,8 @@ export async function GET(request: NextRequest) {
 // POST /api/github/actions - Trigger workflow, cancel, rerun
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

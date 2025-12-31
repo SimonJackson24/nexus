@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { getSupabaseService } from '@/lib/supabase/admin';
 
 // GET /api/billing/subscription - Get user's subscription
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -66,6 +63,8 @@ export async function GET(request: NextRequest) {
 // POST /api/billing/subscription - Create or update subscription
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -157,6 +156,8 @@ export async function POST(request: NextRequest) {
 // PATCH /api/billing/subscription - Update subscription mode (credits/byok)
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -233,6 +234,8 @@ export async function PATCH(request: NextRequest) {
 // DELETE /api/billing/subscription - Cancel subscription
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = getSupabaseService();
+    
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
