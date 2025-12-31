@@ -265,13 +265,16 @@ export default function Homepage() {
   const [error, setError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-
-  const supabase = createClient();
+  const [supabase, setSupabase] = useState<ReturnType<typeof createClient> | null>(null);
 
   useEffect(() => {
+    // Create Supabase client on client side only
+    const client = createClient();
+    setSupabase(client);
+
     // Check auth state
     const checkAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await client.auth.getUser();
       setUser(user);
     };
     checkAuth();
@@ -282,10 +285,11 @@ export default function Homepage() {
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [supabase]);
+  }, []);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabase) return;
     setLoading(true);
     setError('');
 
@@ -307,6 +311,7 @@ export default function Homepage() {
   };
 
   const handleSignOut = async () => {
+    if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
   };
