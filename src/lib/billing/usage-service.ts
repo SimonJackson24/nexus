@@ -1,21 +1,8 @@
 // AI Usage Tracking Service
 // Handles credit deduction and usage recording
 
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from '@/lib/supabase/types';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { DEFAULT_MODEL_RATES } from './hybrid-types';
-
-// Lazy-initialized typed Supabase client
-let supabaseClient: ReturnType<typeof createClient<Database>> | null = null;
-
-function getSupabase(): ReturnType<typeof createClient<Database>> {
-  if (!supabaseClient) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-    supabaseClient = createClient<Database>(supabaseUrl, supabaseServiceKey);
-  }
-  return supabaseClient;
-}
 
 export interface UsageRecord {
   user_id: string;
@@ -38,7 +25,7 @@ export interface CheckResult {
 
 // Get user's subscription and credit balance
 export async function getUserSubscription(userId: string) {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   const { data: subscription, error } = await supabase
     .from('user_subscriptions')
     .select(`
@@ -119,8 +106,7 @@ export function calculateCredits(
   const totalCredits = inputCredits + outputCredits;
 
   // Estimate cost in pence (very rough approximation for tracking)
-  // In production, you'd track actual costs from provider responses
-  const costPerCredit = 0.01; // 1 cent per credit rough estimate
+  const costPerCredit = 0.01;
   const estimatedCost = Math.round(totalCredits * costPerCredit * 100);
 
   return {
@@ -131,7 +117,7 @@ export function calculateCredits(
 
 // Record AI usage and deduct credits
 export async function recordUsage(record: UsageRecord): Promise<{ success: boolean; error?: string }> {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   try {
     // Insert usage record (credit deduction happens via database trigger)
     const { error: insertError } = await supabase
@@ -166,7 +152,7 @@ export async function getUserUsageStats(
   startDate?: Date,
   endDate?: Date
 ) {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   let query = supabase
     .from('ai_usage')
     .select(`
@@ -205,7 +191,7 @@ export async function getUserUsageStats(
     by_provider: {} as Record<string, { requests: number; tokens: number; credits: number }>,
   };
 
-  usage?.forEach(record => {
+  usage?.forEach((record: any) => {
     stats.total_input_tokens += record.input_tokens;
     stats.total_output_tokens += record.output_tokens;
     stats.total_credits_used += record.credits_deducted;
@@ -229,7 +215,7 @@ export async function getUserUsageStats(
 
 // Get user's API keys for a provider
 export async function getUserApiKeys(userId: string, provider: string) {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   const { data: keys, error } = await supabase
     .from('user_api_keys')
     .select('*')
@@ -248,7 +234,7 @@ export async function getUserApiKeys(userId: string, provider: string) {
 
 // Update last_used_at for an API key
 export async function updateKeyLastUsed(keyId: string) {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   await supabase
     .from('user_api_keys')
     .update({ last_used_at: new Date().toISOString() })
@@ -257,7 +243,7 @@ export async function updateKeyLastUsed(keyId: string) {
 
 // Validate and mark a key as invalid
 export async function markKeyInvalid(keyId: string, error: string) {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   await supabase
     .from('user_api_keys')
     .update({

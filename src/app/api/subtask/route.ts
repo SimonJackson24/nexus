@@ -1,111 +1,196 @@
-import { createClient } from '@/lib/supabase/server'
-import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server';
+import { NextResponse } from 'next/server';
 
-// GET /api/subtask?chat_id=xxx - Get subtasks for a chat
+// GET /api/subtask - List subtasks
 export async function GET(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const supabase = createClient() as any;
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const task_id = searchParams.get('task_id');
+    const parent_id = searchParams.get('parent_id');
+
+    let query = supabase
+      .from('subtasks')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('sort_order', { ascending: true });
+
+    if (task_id) {
+      query = query.eq('task_id', task_id);
+    }
+
+    if (parent_id) {
+      query = query.eq('parent_id', parent_id);
+    }
+
+    const { data: subtasks, error } = await query;
+
+    if (error) {
+      console.error('Error fetching subtasks:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch subtasks' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ subtasks: subtasks || [] });
+  } catch (error) {
+    console.error('Error fetching subtasks:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch subtasks' },
+      { status: 500 }
+    );
   }
-
-  const { searchParams } = new URL(request.url)
-  const chatId = searchParams.get('chat_id')
-
-  if (!chatId) {
-    return NextResponse.json({ error: 'Missing chat_id parameter' }, { status: 400 })
-  }
-
-  const { data: subtasks, error } = await supabase
-    .from('subtasks')
-    .select('*')
-    .eq('chat_id', chatId)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ subtasks })
 }
 
-// POST /api/subtask - Create a subtask
+// POST /api/subtask - Create a new subtask
 export async function POST(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
-    const body = await request.json()
-    const { chat_id, parent_message_id, title, description, priority } = body
-
-    if (!chat_id || !title) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: chat_id, title' 
-      }, { status: 400 })
+    const supabase = createClient() as any;
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    // Verify chat ownership
-    const { data: chat } = await supabase
-      .from('chats')
-      .select('user_id')
-      .eq('id', chat_id)
-      .single()
-
-    if (!chat || chat.user_id !== user.id) {
-      return NextResponse.json({ error: 'Chat not found' }, { status: 404 })
-    }
+    const body = await request.json();
+    const { task_id, parent_id, title, description, status, sort_order } = body;
 
     const { data: subtask, error } = await supabase
       .from('subtasks')
       .insert({
         user_id: user.id,
-        chat_id,
-        parent_message_id,
+        task_id: task_id || null,
+        parent_id: parent_id || null,
         title,
-        description,
-        priority: priority || 'medium',
-        status: 'pending',
+        description: description || null,
+        status: status || 'pending',
+        sort_order: sort_order || 0,
       })
       .select()
-      .single()
+      .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('Error creating subtask:', error);
+      return NextResponse.json(
+        { error: 'Failed to create subtask' },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ subtask }, { status: 201 })
+    return NextResponse.json({ subtask });
   } catch (error) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    console.error('Error creating subtask:', error);
+    return NextResponse.json(
+      { error: 'Failed to create subtask' },
+      { status: 500 }
+    );
   }
 }
 
 // PATCH /api/subtask - Update a subtask
 export async function PATCH(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
-    const body = await request.json()
-    const { id, title, description, status, priority, linked_context } = body
+    const supabase = createClient() as any;
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const { id, title, description, status, sort_order, completed_at } = body;
+
+    // Verify ownership
+    const { data: existing } = await supabase
+      .from('subtasks')
+      .select('user_id')
+      .eq('id', id)
+      .single();
+
+    if (!existing || existing.user_id !== user.id) {
+      return NextResponse.json(
+        { error: 'Subtask not found or forbidden' },
+        { status: 404 }
+      );
+    }
+
+    const { data: subtask, error } = await supabase
+      .from('subtasks')
+      .update({
+        title,
+        description,
+        status,
+        sort_order,
+        completed_at: completed_at || (status === 'completed' ? new Date().toISOString() : null),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating subtask:', error);
+      return NextResponse.json(
+        { error: 'Failed to update subtask' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ subtask });
+  } catch (error) {
+    console.error('Error updating subtask:', error);
+    return NextResponse.json(
+      { error: 'Failed to update subtask' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/subtask - Delete a subtask
+export async function DELETE(request: Request) {
+  try {
+    const supabase = createClient() as any;
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json({ error: 'Missing subtask id' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Subtask ID is required' },
+        { status: 400 }
+      );
     }
 
     // Verify ownership
@@ -113,80 +198,34 @@ export async function PATCH(request: Request) {
       .from('subtasks')
       .select('user_id')
       .eq('id', id)
-      .single()
+      .single();
 
     if (!existing || existing.user_id !== user.id) {
-      return NextResponse.json({ error: 'Subtask not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Subtask not found or forbidden' },
+        { status: 404 }
+      );
     }
 
-    const updateData: any = {
-      title,
-      description,
-      status,
-      priority,
-      linked_context,
-      updated_at: new Date().toISOString(),
-    }
-
-    // Set completed_at if status is completed
-    if (status === 'completed') {
-      updateData.completed_at = new Date().toISOString()
-    }
-
-    const { data: subtask, error } = await supabase
+    const { error } = await supabase
       .from('subtasks')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single()
+      .delete()
+      .eq('id', id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('Error deleting subtask:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete subtask' },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ subtask })
+    return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    console.error('Error deleting subtask:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete subtask' },
+      { status: 500 }
+    );
   }
-}
-
-// DELETE /api/subtask?id=xxx - Delete a subtask
-export async function DELETE(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const { searchParams } = new URL(request.url)
-  const id = searchParams.get('id')
-
-  if (!id) {
-    return NextResponse.json({ error: 'Missing subtask id' }, { status: 400 })
-  }
-
-  // Verify ownership
-  const { data: existing } = await supabase
-    .from('subtasks')
-    .select('user_id')
-    .eq('id', id)
-    .single()
-
-  if (!existing || existing.user_id !== user.id) {
-    return NextResponse.json({ error: 'Subtask not found' }, { status: 404 })
-  }
-
-  const { error } = await supabase
-    .from('subtasks')
-    .delete()
-    .eq('id', id)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ success: true })
 }

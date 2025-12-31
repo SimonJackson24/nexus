@@ -6,7 +6,7 @@ import { isCodeFile } from '@/lib/github/types';
 // GET /api/github/files - List files in a repo or search code
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -135,10 +135,10 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// GET /api/github/files/content - Get file content
+// POST /api/github/files/content - Get file content
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
     const tree = await getRepoTree(accessToken, owner, repoName, branch, false);
     const fileItem = tree.find((item) => item.path === path);
 
-    if (!fileItem || fileItem.type !== 'blob') {
+    if (!fileItem || (fileItem as any).type !== 'blob') {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
 

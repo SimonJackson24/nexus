@@ -5,7 +5,7 @@ import { listUserRepos, getGitHubAccessToken, syncUserRepos } from '@/lib/github
 // GET /api/github/repos - List user's repositories
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       connected: true,
       synced: false,
-      repos: cachedRepos.map((repo) => ({
+      repos: cachedRepos.map((repo: any) => ({
         id: repo.repo_id,
         name: repo.repo_name,
         full_name: repo.repo_full_name,
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
 // DELETE /api/github/repos - Disconnect GitHub
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {

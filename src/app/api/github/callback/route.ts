@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 // OAuth callback handler
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const body = await request.json();
     const { code, state } = body;

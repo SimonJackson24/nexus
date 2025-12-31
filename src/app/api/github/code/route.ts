@@ -18,7 +18,7 @@ function encodeContent(content: string): string {
 // Query params: repo, branch, status (for pending changes)
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
 // POST /api/github/code - Create branch, update files, create PR
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -297,7 +297,7 @@ export async function POST(request: NextRequest) {
 // PATCH /api/github/code - Approve or reject pending changes
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -404,5 +404,3 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-

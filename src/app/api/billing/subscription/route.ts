@@ -4,7 +4,7 @@ import { getSupabaseService } from '@/lib/supabase/admin';
 // GET /api/billing/subscription - Get user's subscription
 export async function GET(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 // POST /api/billing/subscription - Create or update subscription
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
 // PATCH /api/billing/subscription - Update subscription mode (credits/byok)
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -234,7 +234,7 @@ export async function PATCH(request: NextRequest) {
 // DELETE /api/billing/subscription - Cancel subscription
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = getSupabaseService();
+    const supabase = getSupabaseService() as any;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {

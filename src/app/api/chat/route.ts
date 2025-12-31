@@ -1,110 +1,113 @@
-import { createClient } from '@/lib/supabase/server'
-import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server';
+import { NextResponse } from 'next/server';
 
-// GET /api/chat - List all chats for the current user
+// GET /api/chat - List user's chats
 export async function GET(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const supabase = createClient() as any;
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const folderId = searchParams.get('folder_id');
+    const archived = searchParams.get('archived') === 'true';
+    const limit = parseInt(searchParams.get('limit') || '50');
+    const offset = parseInt(searchParams.get('offset') || '0');
+
+    let query = supabase
+      .from('chats')
+      .select(`
+        *,
+        agent:agent_profiles(id, name, description, avatar, color, provider, model)
+      `, { count: 'exact' })
+      .eq('user_id', user.id)
+      .eq('is_archived', archived)
+      .order('last_message_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (folderId) {
+      query = query.eq('folder_id', folderId);
+    }
+
+    const { data: chats, error, count } = await query;
+
+    if (error) {
+      console.error('Error fetching chats:', error);
+      return NextResponse.json(
+        { error: 'Failed to fetch chats' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      chats: chats || [],
+      count: count || 0,
+      limit,
+      offset,
+    });
+  } catch (error) {
+    console.error('Error fetching chats:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch chats' },
+      { status: 500 }
+    );
   }
-
-  const { searchParams } = new URL(request.url)
-  const folderId = searchParams.get('folder_id')
-  const pinned = searchParams.get('pinned')
-  const limit = parseInt(searchParams.get('limit') || '50')
-  const offset = parseInt(searchParams.get('offset') || '0')
-
-  let query = supabase
-    .from('chats')
-    .select(`
-      *,
-      messages (
-        id,
-        role,
-        content,
-        created_at
-      )
-    `)
-    .eq('user_id', user.id)
-    .order('updated_at', { ascending: false })
-    .range(offset, offset + limit - 1)
-
-  if (folderId) {
-    query = query.eq('folder_id', folderId)
-  }
-
-  if (pinned === 'true') {
-    query = query.eq('pinned', true)
-  } else if (pinned === 'false') {
-    query = query.eq('pinned', false)
-  }
-
-  const { data: chats, error } = await query
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ chats })
 }
 
 // POST /api/chat - Create a new chat
 export async function POST(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
-    const body = await request.json()
-    const { title, agent_id, provider, model, folder_id, tags } = body
+    const supabase = createClient() as any;
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
 
-    // Create the chat
-    const { data: chat, error } = await supabase
+    const body = await request.json();
+    const { title, agent_id, provider, model, folder_id } = body;
+
+    // Create chat
+    const { data: chat, error: chatError } = await supabase
       .from('chats')
       .insert({
         user_id: user.id,
-        title: title || 'New Conversation',
-        agent_id,
-        provider,
-        model,
-        folder_id,
-        tags: tags || [],
+        title: title || 'New Chat',
+        agent_id: agent_id || null,
+        provider: provider || null,
+        model: model || null,
+        folder_id: folder_id || null,
       })
       .select()
-      .single()
+      .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    if (chatError) {
+      console.error('Error creating chat:', chatError);
+      return NextResponse.json(
+        { error: 'Failed to create chat' },
+        { status: 500 }
+      );
     }
 
-    // Create system message if agent is specified
-    if (agent_id) {
-      const { data: agent } = await supabase
-        .from('agent_profiles')
-        .select('system_prompt')
-        .eq('id', agent_id)
-        .single()
-
-      if (agent) {
-        await supabase.from('messages').insert({
-          chat_id: chat.id,
-          role: 'system',
-          content: agent.system_prompt,
-        })
-      }
-    }
-
-    return NextResponse.json({ chat }, { status: 201 })
+    return NextResponse.json({ chat });
   } catch (error) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    console.error('Error creating chat:', error);
+    return NextResponse.json(
+      { error: 'Failed to create chat' },
+      { status: 500 }
+    );
   }
 }

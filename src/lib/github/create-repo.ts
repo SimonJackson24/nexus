@@ -1,21 +1,8 @@
 // GitHub Repository Creation Service
 // Phase 5: Create new repos and push files
 
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from '@/lib/supabase/types';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getGitHubAccessToken } from './api-service';
-
-// Lazy-initialized typed Supabase client
-let supabaseClient: ReturnType<typeof createClient<Database>> | null = null;
-
-function getSupabase(): ReturnType<typeof createClient<Database>> {
-  if (!supabaseClient) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-    supabaseClient = createClient<Database>(supabaseUrl, supabaseServiceKey);
-  }
-  return supabaseClient;
-}
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -113,7 +100,7 @@ export async function createRepository(
 // ============================================
 
 async function storeCreatedRepo(userId: string, githubRepo: any) {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin() as any;
   try {
     // Get the user's GitHub connection
     const { data: connection } = await supabase

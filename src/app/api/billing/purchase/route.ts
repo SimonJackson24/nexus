@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 // POST /api/billing/purchase - Create a purchase order
 export async function POST(request: Request) {
   try {
-    const supabase = createClient();
+    const supabase = createClient() as any;
     
     // Get current user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       item = pkg;
     } else if (plan_id) {
       const { data: plan } = await supabase
-        .from('subscription_plans')
+        .from('subscription_tiers')
         .select('*')
         .eq('id', plan_id)
         .single();
