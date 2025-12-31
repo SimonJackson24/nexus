@@ -11,22 +11,24 @@ import {
   Volume2, VolumeX, Sun, Moon, Wifi, WifiOff,
   ChevronLeft, ChevronUp, ChevronDown as ChevronDownIcon,
   ArrowRight, MoreHorizontal, FolderPlus, Archive, Shield,
-  CreditCard, Crown
+  CreditCard, Crown, LogOut
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import SecurityScanner from '@/components/SecurityScanner';
 import BillingDashboard from '@/components/BillingDashboard';
 import AdminDashboard from '@/components/AdminDashboard';
 import { Chat, AgentProfile, Subtask, Folder as FolderType, Provider, Message, MODELS } from '@/lib/types';
-import { DEMO_CHATS, DEMO_AGENTS, DEMO_FOLDERS, DEMO_SUBTASKS, getDemoAgent } from '@/lib/demo-data';
+import { DEMO_AGENTS, getDemoAgent } from '@/lib/demo-data';
+import { createClient } from '@/lib/supabase/client';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 
 // Escape HTML entities - correct order (ampersand first!)
 function escapeHtml(text: string): string {
   const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
+    '&': '&',
+    '<': '<',
+    '>': '>',
+    '"': '"',
     "'": '&#039;'
   };
   return text.replace(/[&<>"']/g, (m) => map[m]);
@@ -493,11 +495,13 @@ function TypingIndicator() {
 
 // Main App Component
 export default function Nexus() {
-  const [demoMode, setDemoMode] = useState(true);
-  const [chats, setChats] = useState<Chat[]>(DEMO_CHATS);
+  const [demoMode, setDemoMode] = useState(false);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [supabase] = useState(() => createClient());
+  const [chats, setChats] = useState<Chat[]>([]);
   const [agents] = useState<AgentProfile[]>(DEMO_AGENTS);
-  const [folders, setFolders] = useState<FolderType[]>(DEMO_FOLDERS);
-  const [subtasks, setSubtasks] = useState<Subtask[]>(DEMO_SUBTASKS);
+  const [folders, setFolders] = useState<FolderType[]>([]);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentProfile | null>(null);
@@ -506,7 +510,7 @@ export default function Nexus() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['folder-projects']));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [showContextPanel, setShowContextPanel] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -514,6 +518,8 @@ export default function Nexus() {
   const [showSecurityScanner, setShowSecurityScanner] = useState(false);
   const [showBilling, setShowBilling] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -528,9 +534,9 @@ export default function Nexus() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages, isTyping]);
 
-  // Initialize with first chat
+  // Initialize with first chat if in demo mode
   useEffect(() => {
-    if (!activeChatId && chats.length > 0) {
+    if (demoMode && !activeChatId && chats.length > 0) {
       setActiveChatId(chats[0].id);
       const chat = chats[0];
       if (chat.agentId) {
@@ -542,7 +548,156 @@ export default function Nexus() {
         }
       }
     }
-  }, [chats, activeChatId, agents]);
+  }, [demoMode, chats, activeChatId, agents]);
+
+  // Check authentication state
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+      
+      if (user) {
+        // Load user data from Supabase
+        await loadUserData(user.id);
+      } else {
+        // No user - stay in demo mode
+        setDemoMode(true);
+      }
+    };
+    
+    checkAuth();
+    
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadUserData(session.user.id);
+      } else {
+        setDemoMode(true);
+        setChats([]);
+        setFolders([]);
+        setSubtasks([]);
+      }
+    });
+    
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  // Load user data from Supabase
+  const loadUserData = async (userId: string) => {
+    try {
+      // Load folders
+      const { data: userFolders } = await supabase
+        .from('folders')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at');
+      
+      if (userFolders) {
+        setFolders(userFolders.map(f => ({
+          id: f.id,
+          name: f.name,
+          icon: f.icon || '📁',
+          color: f.color || '#3b82f6',
+          chatIds: [],
+          createdAt: new Date(f.created_at).getTime(),
+        })));
+      }
+
+      // Load chats
+      const { data: userChats } = await supabase
+        .from('chats')
+        .select('*, messages(*)')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
+      
+      if (userChats) {
+        setChats(userChats.map(c => ({
+          id: c.id,
+          title: c.title,
+          messages: c.messages.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.created_at).getTime(),
+            provider: m.provider,
+            model: m.model,
+          })),
+          agentId: c.agent_id,
+          provider: c.provider,
+          model: c.model,
+          folderId: c.folder_id,
+          tags: c.tags || [],
+          pinned: c.pinned,
+          createdAt: new Date(c.created_at).getTime(),
+          updatedAt: new Date(c.updated_at).getTime(),
+        })));
+      }
+
+      // Load subtasks
+      const { data: userSubtasks } = await supabase
+        .from('subtasks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at');
+      
+      if (userSubtasks) {
+        setSubtasks(userSubtasks.map(s => ({
+          id: s.id,
+          chatId: s.chat_id,
+          parentMessageId: s.parent_message_id,
+          title: s.title,
+          description: s.description,
+          status: s.status,
+          priority: s.priority,
+          linkedContext: s.linked_context || [],
+          dueDate: s.due_date ? new Date(s.due_date).getTime() : undefined,
+          createdAt: new Date(s.created_at).getTime(),
+          completedAt: s.completed_at ? new Date(s.completed_at).getTime() : undefined,
+        })));
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  // Handle sign in
+  const handleSignIn = async (email: string, password: string) => {
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      setShowSignIn(false);
+    } catch (error: any) {
+      alert('Sign in failed: ' + error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Handle sign up
+  const handleSignUp = async (email: string, password: string) => {
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+      alert('Check your email for the confirmation link!');
+    } catch (error: any) {
+      alert('Sign up failed: ' + error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Handle sign out
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setDemoMode(true);
+    setChats([]);
+    setFolders([]);
+    setSubtasks([]);
+  };
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
@@ -557,7 +712,7 @@ export default function Nexus() {
   };
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || !activeChatId || isLoading) return;
+    if (!input.trim() || (!activeChatId && !demoMode) || isLoading) return;
 
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
@@ -568,24 +723,130 @@ export default function Nexus() {
       model,
     };
 
-    setChats(prev => prev.map(chat => {
-      if (chat.id === activeChatId) {
-        return {
-          ...chat,
-          messages: [...chat.messages, userMessage],
-          updatedAt: Date.now(),
-        };
+    if (demoMode) {
+      // Demo mode - update local state only
+      setChats(prev => {
+        let newChats = [...prev];
+        if (activeChatId) {
+          newChats = newChats.map(chat => {
+            if (chat.id === activeChatId) {
+              return {
+                ...chat,
+                messages: [...chat.messages, userMessage],
+                updatedAt: Date.now(),
+              };
+            }
+            return chat;
+          });
+        } else {
+          // Create new chat
+          const newChat: Chat = {
+            id: `chat-${Date.now()}`,
+            title: input.trim().substring(0, 30) + '...',
+            messages: [
+              {
+                id: `msg-${Date.now() - 1}`,
+                role: 'system',
+                content: selectedAgent?.systemPrompt || 'You are a helpful AI assistant.',
+                timestamp: Date.now(),
+              },
+              userMessage,
+            ],
+            agentId: selectedAgent?.id,
+            provider,
+            model,
+            tags: [],
+            pinned: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          newChats = [newChat, ...newChats];
+          setActiveChatId(newChat.id);
+        }
+        return newChats;
+      });
+    } else {
+      // Production mode - save to Supabase
+      let chatId = activeChatId;
+      
+      if (!chatId) {
+        // Create new chat
+        const { data: newChat, error } = await supabase
+          .from('chats')
+          .insert({
+            user_id: user!.id,
+            title: input.trim().substring(0, 30) + '...',
+            agent_id: selectedAgent?.id,
+            provider,
+            model,
+          })
+          .select()
+          .single();
+        
+        if (error) throw error;
+        chatId = newChat.id;
+        setActiveChatId(chatId);
+        
+        // Add to local state
+        setChats(prev => [{
+          id: newChat.id,
+          title: newChat.title,
+          messages: [
+            {
+              id: `msg-${Date.now() - 1}`,
+              role: 'system',
+              content: selectedAgent?.systemPrompt || 'You are a helpful AI assistant.',
+              timestamp: Date.now(),
+            },
+            userMessage,
+          ],
+          agentId: selectedAgent?.id,
+          provider,
+          model,
+          folderId: newChat.folder_id,
+          tags: newChat.tags || [],
+          pinned: newChat.pinned,
+          createdAt: new Date(newChat.created_at).getTime(),
+          updatedAt: new Date(newChat.updated_at).getTime(),
+        }, ...prev]);
+      } else {
+        // Update existing chat
+        await supabase
+          .from('chats')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', chatId);
+        
+        // Update local state
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: [...chat.messages, userMessage],
+              updatedAt: Date.now(),
+            };
+          }
+          return chat;
+        }));
       }
-      return chat;
-    }));
+
+      // Save message to Supabase
+      await supabase.from('messages').insert({
+        chat_id: chatId,
+        role: 'user',
+        content: input.trim(),
+        provider,
+        model,
+      });
+    }
 
     setInput('');
     setIsLoading(true);
     setIsTyping(true);
 
     // Get all messages including system prompt
-    const activeChat = chats.find(c => c.id === activeChatId);
-    const allMessages = activeChat?.messages || [];
+    const currentChat = chats.find(c => c.id === activeChatId) || 
+      { messages: selectedAgent?.systemPrompt ? [{ role: 'system', content: selectedAgent.systemPrompt }] : [] };
+    const allMessages = currentChat.messages || [];
     const messagesToSend = [
       ...allMessages,
       userMessage,
@@ -619,16 +880,40 @@ export default function Nexus() {
         model: data.model,
       };
 
-      setChats(prev => prev.map(chat => {
-        if (chat.id === activeChatId) {
-          return {
-            ...chat,
-            messages: [...chat.messages, aiMessage],
-            updatedAt: Date.now(),
-          };
-        }
-        return chat;
-      }));
+      if (demoMode) {
+        // Demo mode - update local state only
+        setChats(prev => prev.map(chat => {
+          if (chat.id === activeChatId) {
+            return {
+              ...chat,
+              messages: [...chat.messages, aiMessage],
+              updatedAt: Date.now(),
+            };
+          }
+          return chat;
+        }));
+      } else {
+        // Production mode - save to Supabase
+        await supabase.from('messages').insert({
+          chat_id: activeChatId!,
+          role: 'assistant',
+          content: data.content,
+          provider: data.provider,
+          model: data.model,
+        });
+
+        // Update local state
+        setChats(prev => prev.map(chat => {
+          if (chat.id === activeChatId) {
+            return {
+              ...chat,
+              messages: [...chat.messages, aiMessage],
+              updatedAt: Date.now(),
+            };
+          }
+          return chat;
+        }));
+      }
     } catch (error) {
       // Fallback to demo response on error
       console.error('AI request failed, using demo response:', error);
@@ -659,7 +944,7 @@ export default function Nexus() {
       setIsLoading(false);
       setIsTyping(false);
     }
-  }, [input, activeChatId, isLoading, provider, model, chats]);
+  }, [input, activeChatId, isLoading, provider, model, chats, demoMode, selectedAgent, user]);
 
   const handleNewChat = () => {
     const newChat: Chat = {
@@ -703,6 +988,56 @@ export default function Nexus() {
     return chat.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
            chat.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
   });
+
+  // Demo mode data initialization
+  useEffect(() => {
+    if (demoMode) {
+      setChats([
+        {
+          id: 'chat-1',
+          title: 'Build SaaS Platform',
+          messages: [
+            { id: 'msg-1', role: 'user', content: 'I want to build a SaaS platform for project management.', timestamp: Date.now() - 86400000 * 2, provider: 'openai' as Provider, model: 'gpt-4-turbo-preview' },
+            { id: 'msg-2', role: 'assistant', content: 'I will help you plan this SaaS platform...', timestamp: Date.now() - 86400000 * 2 + 1800000, provider: 'openai' as Provider, model: 'gpt-4-turbo-preview' },
+          ],
+          agentId: 'agent-architect',
+          provider: 'openai',
+          model: 'gpt-4-turbo-preview',
+          folderId: 'folder-projects',
+          tags: ['saas', 'planning'],
+          pinned: true,
+          createdAt: Date.now() - 86400000 * 2,
+          updatedAt: Date.now() - 86400000 * 2 + 1800000,
+        },
+        {
+          id: 'chat-2',
+          title: 'React Component Help',
+          messages: [
+            { id: 'msg-3', role: 'user', content: "I'm building a custom select component in React...", timestamp: Date.now() - 86400000 * 3, provider: 'minimax' as Provider, model: 'abab6.5s-chat' },
+            { id: 'msg-4', role: 'assistant', content: 'Great question! Your component has several accessibility issues...', timestamp: Date.now() - 86400000 * 3 + 3600000, provider: 'minimax' as Provider, model: 'abab6.5s-chat' },
+          ],
+          agentId: 'agent-coder',
+          provider: 'minimax',
+          model: 'abab6.5s-chat',
+          tags: ['react'],
+          pinned: false,
+          createdAt: Date.now() - 86400000 * 3,
+          updatedAt: Date.now() - 86400000 * 3 + 3600000,
+        },
+      ]);
+      setFolders([
+        { id: 'folder-projects', name: 'Projects', icon: '📁', color: '#3b82f6', chatIds: [], createdAt: Date.now() - 86400000 * 7 },
+        { id: 'folder-learning', name: 'Learning', icon: '📚', color: '#10b981', chatIds: [], createdAt: Date.now() - 86400000 * 5 },
+        { id: 'folder-ideas', name: 'Ideas', icon: '💡', color: '#f59e0b', chatIds: [], createdAt: Date.now() - 86400000 * 3 },
+      ]);
+      setSubtasks([
+        { id: 'subtask-1', chatId: 'chat-1', parentMessageId: 'msg-1', title: 'Research competitor features', description: 'Analyze top 5 competitors', status: 'completed', priority: 'high', linkedContext: [], createdAt: Date.now() - 86400000 * 2, completedAt: Date.now() - 86400000 },
+        { id: 'subtask-2', chatId: 'chat-1', parentMessageId: 'msg-1', title: 'Design system architecture', description: 'Create architecture diagrams', status: 'in_progress', priority: 'high', linkedContext: [], createdAt: Date.now() - 86400000 },
+        { id: 'subtask-3', chatId: 'chat-1', parentMessageId: 'msg-1', title: 'Create MVP timeline', description: 'Draft 12-week roadmap', status: 'pending', priority: 'medium', linkedContext: [], createdAt: Date.now() },
+      ]);
+      setExpandedFolders(new Set(['folder-projects']));
+    }
+  }, [demoMode]);
 
   return (
     <div className="h-screen flex flex-col bg-nexus-darker">
@@ -859,18 +1194,48 @@ export default function Nexus() {
             )}
           </div>
 
-          {/* User/Agent Section */}
+          {/* User Section */}
           {!sidebarCollapsed && (
             <div className="p-3 border-t border-nexus-border">
-              <div className="flex items-center gap-2 px-2 py-2">
-                <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-blue-600 rounded-full flex items-center justify-center">
-                  <User className="w-4 h-4 text-white" />
+              {user ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-2 py-2">
+                    <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-blue-600 rounded-full flex items-center justify-center">
+                      <User className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{user.email}</div>
+                      <div className="text-xs text-nexus-muted">Authenticated</div>
+                    </div>
+                    <button
+                      onClick={handleSignOut}
+                      className="p-1.5 hover:bg-nexus-hover rounded-lg transition-colors text-nexus-muted"
+                      title="Sign out"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium">Demo User</div>
-                  <div className="text-xs text-nexus-muted">Free Plan</div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-2 py-2">
+                    <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-blue-600 rounded-full flex items-center justify-center">
+                      <User className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">Guest</div>
+                      <div className="text-xs text-nexus-muted">Demo Mode</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowSignIn(true)}
+                    className="w-full flex items-center justify-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
+                  >
+                    <User className="w-4 h-4" />
+                    Sign In
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </aside>
@@ -957,7 +1322,9 @@ export default function Nexus() {
                   <Brain className="w-10 h-10 text-white" />
                 </div>
                 <h2 className="text-2xl font-bold mb-2">Welcome to Nexus</h2>
-                <p className="text-nexus-muted mb-6">Select a chat or start a new conversation</p>
+                <p className="text-nexus-muted mb-6">
+                  {user ? 'Start a new conversation' : 'Sign in to save your chats or try demo mode'}
+                </p>
                 <button
                   onClick={handleNewChat}
                   className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:opacity-90 transition-opacity"
@@ -1059,11 +1426,103 @@ export default function Nexus() {
         )}
       </div>
 
+      {/* Sign In Modal */}
+      {showSignIn && (
+        <SignInModal
+          onClose={() => setShowSignIn(false)}
+          onSignIn={handleSignIn}
+          onSignUp={handleSignUp}
+          loading={authLoading}
+        />
+      )}
+
       {/* Billing Dashboard Modal */}
       {showBilling && <BillingDashboard onClose={() => setShowBilling(false)} />}
 
       {/* Admin Dashboard Modal */}
       {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
+    </div>
+  );
+}
+
+// Sign In Modal Component
+function SignInModal({ 
+  onClose, 
+  onSignIn, 
+  onSignUp,
+  loading 
+}: { 
+  onClose: () => void; 
+  onSignIn: (email: string, password: string) => void;
+  onSignUp: (email: string, password: string) => void;
+  loading: boolean;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSignUp) {
+      onSignUp(email, password);
+    } else {
+      onSignIn(email, password);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-nexus-card border border-nexus-border rounded-xl w-full max-w-md p-6 animate-slide-in-up">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold">{isSignUp ? 'Create Account' : 'Sign In'}</h2>
+          <button onClick={onClose} className="p-2 hover:bg-nexus-hover rounded-lg">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-nexus-dark border border-nexus-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-nexus-dark border border-nexus-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="••••••••"
+              required
+              minLength={6}
+            />
+          </div>
+          
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-2 rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {loading ? 'Please wait...' : isSignUp ? 'Create Account' : 'Sign In'}
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => setIsSignUp(!isSignUp)}
+            className="w-full text-sm text-primary-400 hover:text-primary-300"
+          >
+            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
