@@ -40,24 +40,18 @@ jobs:
           # Convert username to lowercase for ghcr.io
           REGISTRY="ghcr.io/${USERNAME,,}"
           IMAGE_NAME="nexus"
-
           # Build the image
           docker build -t $REGISTRY/$IMAGE_NAME:latest \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
             .
-
           # Login to GHCR
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u $USERNAME --password-stdin
-
           # Push to registry
           docker push $REGISTRY/$IMAGE_NAME:latest
-
           # Tag with commit SHA
           docker tag $REGISTRY/$IMAGE_NAME:latest $REGISTRY/$IMAGE_NAME:${{ github.sha }}
           docker push $REGISTRY/$IMAGE_NAME:${{ github.sha }}
-
           echo "image_ref=$REGISTRY/$IMAGE_NAME:latest" >> $GITHUB_OUTPUT
-
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -71,21 +65,17 @@ jobs:
             echo "Time: $(date)"
             echo "Commit: ${{ github.sha }}"
             echo "=========================================="
-
             # Navigate to app directory
             cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
-
             # Pull latest changes
             echo "📦 Pulling latest code..."
             git fetch origin main
             git checkout main
             git stash || true
             git pull origin main || git reset --hard origin/main
-
             # Login to container registry
             echo "🔐 Logging into container registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
             # Function to find free port
             find_free_port() {
               local base_port=$1
@@ -128,11 +118,9 @@ jobs:
               sed -i "s/\"8100:8000\"/\"$NEW_PORT:8000\"/g" docker-compose.yml
               sed -i "s/\"8101:8001\"/\"$((NEW_PORT + 1)):8001\"/g" docker-compose.yml
             fi
-
             # Pull new image
             echo "🐳 Pulling Docker image..."
             docker compose pull nexus
-
             # Get Supabase keys from running containers
             echo "🔑 Extracting Supabase keys..."
             SUPABASE_ANON_KEY=$(docker exec supabase-db env 2>/dev/null | grep ANON_KEY | cut -d'=' -f2 || echo "")
@@ -141,14 +129,14 @@ jobs:
             # Create .env file with all required variables
             echo "📝 Creating .env file..."
             cat > .env << ENVEOF
-NEXT_PUBLIC_SUPABASE_URL=http://kong:8000
-NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-${{ secrets.SUPABASE_ANON_KEY }}}
-SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE:-${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}}
-NEXUS_SECRET_KEY=${{ secrets.NEXUS_SECRET_KEY }}
-OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-MINIMAX_API_KEY=${{ secrets.MINIMAX_API_KEY }}
-ENVEOF
+            NEXT_PUBLIC_SUPABASE_URL=http://kong:8000
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-${{ secrets.SUPABASE_ANON_KEY }}}
+            SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE:-${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}}
+            NEXUS_SECRET_KEY=${{ secrets.NEXUS_SECRET_KEY }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            MINIMAX_API_KEY=${{ secrets.MINIMAX_API_KEY }}
+            ENVEOF
 
             # Restart services with new environment
             echo "🔄 Restarting services..."
@@ -195,7 +183,6 @@ ENVEOF
             echo "status=failed" >> $GITHUB_OUTPUT
             echo "::error::Deployment failed!"
           fi
-
       - name: Discord notification (optional)
         if: always() && env.DISCORD_WEBHOOK != ''
         uses: appleboy/discord-action@v1.0.0
