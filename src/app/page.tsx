@@ -10,10 +10,13 @@ import {
   Globe, Aperture, Brain, Layers, Link2, RefreshCw,
   Volume2, VolumeX, Sun, Moon, Wifi, WifiOff,
   ChevronLeft, ChevronUp, ChevronDown as ChevronDownIcon,
-  ArrowRight, MoreHorizontal, FolderPlus, Archive, Shield
+  ArrowRight, MoreHorizontal, FolderPlus, Archive, Shield,
+  CreditCard, Crown
 } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import SecurityScanner from '@/components/SecurityScanner';
+import BillingDashboard from '@/components/BillingDashboard';
+import AdminDashboard from '@/components/AdminDashboard';
 import { Chat, AgentProfile, Subtask, Folder as FolderType, Provider, Message, MODELS } from '@/lib/types';
 import { DEMO_CHATS, DEMO_AGENTS, DEMO_FOLDERS, DEMO_SUBTASKS, getDemoAgent } from '@/lib/demo-data';
 
@@ -509,6 +512,8 @@ export default function Nexus() {
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showSecurityScanner, setShowSecurityScanner] = useState(false);
+  const [showBilling, setShowBilling] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -752,6 +757,20 @@ export default function Nexus() {
             }`}
           >
             <Layers className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setShowBilling(true)}
+            className="p-2 hover:bg-nexus-hover rounded-lg transition-colors text-nexus-muted"
+            title="Billing"
+          >
+            <CreditCard className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setShowAdmin(true)}
+            className="p-2 hover:bg-nexus-hover rounded-lg transition-colors text-nexus-muted"
+            title="Admin Dashboard"
+          >
+            <Crown className="w-5 h-5" />
           </button>
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -1039,6 +1058,12 @@ export default function Nexus() {
           </aside>
         )}
       </div>
+
+      {/* Billing Dashboard Modal */}
+      {showBilling && <BillingDashboard onClose={() => setShowBilling(false)} />}
+
+      {/* Admin Dashboard Modal */}
+      {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }
