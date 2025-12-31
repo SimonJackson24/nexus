@@ -12,14 +12,31 @@ import {
   ChevronLeft, ChevronUp, ChevronDown as ChevronDownIcon,
   ArrowRight, MoreHorizontal, FolderPlus, Archive, Shield
 } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import SecurityScanner from '@/components/SecurityScanner';
 import { Chat, AgentProfile, Subtask, Folder as FolderType, Provider, Message, MODELS } from '@/lib/types';
 import { DEMO_CHATS, DEMO_AGENTS, DEMO_FOLDERS, DEMO_SUBTASKS, getDemoAgent } from '@/lib/demo-data';
 
-// Markdown parser
+// Escape HTML entities - correct order (ampersand first!)
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, (m) => map[m]);
+}
+
+// Safe markdown parser with DOMPurify
 function parseMarkdown(text: string): string {
-  return text
-    .replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => `<pre class="code-block"><code class="language-${lang || ''}">${escapeHtml(code.trim())}</code></pre>`)
+  // First, escape any HTML in the input to prevent XSS
+  const escaped = escapeHtml(text);
+  
+  // Then parse markdown
+  let html = escaped
+    .replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => `<pre class="code-block"><code class="language-${lang || ''}">${code.trim()}</code></pre>`)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
@@ -30,10 +47,12 @@ function parseMarkdown(text: string): string {
     .replace(/^\- (.*$)/gm, '<li>$1</li>')
     .replace(/^\d+\. (.*$)/gm, '<li>$1</li>')
     .replace(/\n/g, '<br>');
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"').replace(/'/g, '&#039;');
+  
+  // Finally, sanitize with DOMPurify to ensure no XSS slips through
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['b', 'i', 'strong', 'em', 'a', 'p', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'span', 'div'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'lang']
+  });
 }
 
 // Provider icons
@@ -559,67 +578,83 @@ export default function Nexus() {
     setIsLoading(true);
     setIsTyping(true);
 
-    // Simulate AI response (demo mode)
-    setTimeout(() => {
-      const responses = [
-        "That's a great question! Let me break this down for you.\n\n## Key Points\n\n1. **First consideration** - This is important because...\n2. **Second point** - Another factor to keep in mind\n3. **Finally** - Remember to...\n\nHere's a code example:\n\n```javascript\n// Example implementation\nfunction example() {\n  console.log('Hello, Nexus!');\n}\n```\n\nWould you like me to elaborate on any of these points?",
-        "I understand what you're looking for. Here's my analysis:\n\n### Approach\n\nBased on your requirements, I'd recommend:\n\n- **Option A** - Best for scalability\n- **Option B** - Quickest to implement\n- **Option C** - Most cost-effective\n\n### Code Example\n\n```python\n# Sample implementation\ndef process_data(input_data):\n    result = transform(input_data)\n    return result\n```\n\nWhat aspects would you like to explore further?",
-        "Excellent question! This is a common challenge, and there are several approaches we can take.\n\n## Strategies\n\n1. **Strategy 1** - Advantages include simplicity\n2. **Strategy 2** - Better for complex scenarios\n3. **Strategy 3** - Trade-off analysis\n\n### Implementation\n\n```typescript\ninterface Solution {\n  strategy: Strategy;\n  complexity: 'low' | 'medium' | 'high';\n  effectiveness: number;\n}\n```\n\nWhich approach aligns best with your goals?",
-      ];
+    // Get all messages including system prompt
+    const activeChat = chats.find(c => c.id === activeChatId);
+    const allMessages = activeChat?.messages || [];
+    const messagesToSend = [
+      ...allMessages,
+      userMessage,
+    ];
+
+    try {
+      // Call real AI API
+      const response = await fetch('/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: messagesToSend,
+          provider,
+          model,
+          chatId: activeChatId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('AI request failed');
+      }
+
+      const data = await response.json();
 
       const aiMessage: Message = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant',
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: data.content,
         timestamp: Date.now(),
-        provider,
-        model,
-        subtasks: Math.random() > 0.5 ? [
-          {
-            id: `subtask-${Date.now()}`,
-            chatId: activeChatId,
-            parentMessageId: userMessage.id,
-            title: 'Research related topics',
-            description: 'Dive deeper into the concepts mentioned',
-            status: 'pending',
-            priority: 'medium',
-            linkedContext: [],
-            createdAt: Date.now(),
-          },
-          {
-            id: `subtask-${Date.now() + 1}`,
-            chatId: activeChatId,
-            parentMessageId: userMessage.id,
-            title: 'Create implementation plan',
-            description: 'Draft steps for executing this approach',
-            status: 'pending',
-            priority: 'high',
-            linkedContext: [],
-            createdAt: Date.now(),
-          },
-        ] : undefined,
+        provider: data.provider,
+        model: data.model,
       };
 
       setChats(prev => prev.map(chat => {
         if (chat.id === activeChatId) {
-          const updatedChat = {
+          return {
             ...chat,
             messages: [...chat.messages, aiMessage],
             updatedAt: Date.now(),
           };
-          // Add subtasks if present
-          if (aiMessage.subtasks) {
-            setSubtasks(prev => [...prev, ...aiMessage.subtasks!]);
-          }
-          return updatedChat;
         }
         return chat;
       }));
+    } catch (error) {
+      // Fallback to demo response on error
+      console.error('AI request failed, using demo response:', error);
+      const fallbackResponses = [
+        "I apologize, but I'm having trouble connecting to the AI service right now. Please check your API configuration and try again.",
+      ];
+      
+      const aiMessage: Message = {
+        id: `msg-${Date.now() + 1}`,
+        role: 'assistant',
+        content: fallbackResponses[0],
+        timestamp: Date.now(),
+        provider,
+        model,
+      };
 
+      setChats(prev => prev.map(chat => {
+        if (chat.id === activeChatId) {
+          return {
+            ...chat,
+            messages: [...chat.messages, aiMessage],
+            updatedAt: Date.now(),
+          };
+        }
+        return chat;
+      }));
+    } finally {
       setIsLoading(false);
       setIsTyping(false);
-    }, 2000);
-  }, [input, activeChatId, isLoading, provider, model]);
+    }
+  }, [input, activeChatId, isLoading, provider, model, chats]);
 
   const handleNewChat = () => {
     const newChat: Chat = {

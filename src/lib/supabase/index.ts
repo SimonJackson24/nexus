@@ -1,4 +1,4 @@
-export { createClient, createAdminClient } from './server'
+export { createClient } from './server'
 export { 
   createClient as createBrowserClient,
   getUser,

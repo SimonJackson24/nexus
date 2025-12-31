@@ -1,41 +1,45 @@
-import { createBrowserClient } from '@supabase/ssr'
+import { createBrowserClient } from '@supabase/ssr';
+import { SupabaseClient, User } from '@supabase/supabase-js';
 
-export function createClient() {
+export function createClient(): SupabaseClient {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  );
 }
 
-// Helper to get current user
-export async function getUser(supabase: ReturnType<typeof createClient>) {
-  const { data: { user } } = await supabase.auth.getUser()
-  return user
+export async function getUser(supabase: SupabaseClient): Promise<User | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
 }
 
-// Helper to sign in with email/password
-export async function signInWithEmail(supabase: ReturnType<typeof createClient>, email: string, password: string) {
+export async function getSession(supabase: SupabaseClient) {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+}
+
+export async function signInWithEmail(
+  supabase: SupabaseClient,
+  email: string,
+  password: string
+) {
   return supabase.auth.signInWithPassword({
     email,
     password,
-  })
+  });
 }
 
-// Helper to sign up with email/password
-export async function signUpWithEmail(supabase: ReturnType<typeof createClient>, email: string, password: string) {
+export async function signUpWithEmail(
+  supabase: SupabaseClient,
+  email: string,
+  password: string
+) {
   return supabase.auth.signUp({
     email,
     password,
-  })
+  });
 }
 
-// Helper to sign out
-export async function signOut(supabase: ReturnType<typeof createClient>) {
-  return supabase.auth.signOut()
-}
-
-// Helper to get session
-export async function getSession(supabase: ReturnType<typeof createClient>) {
-  const { data: { session } } = await supabase.auth.getSession()
-  return session
+export async function signOut(supabase: SupabaseClient) {
+  return supabase.auth.signOut();
 }

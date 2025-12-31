@@ -1,214 +1,146 @@
-import { createClient } from '@/lib/supabase/server'
-import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@/lib/supabase/server';
+import { NextResponse } from 'next/server';
+import { getAIClient, MODELS, Provider } from '@/lib/ai/clients';
+import { calculateCreditsNeeded } from '@/lib/billing/types';
 
-// Initialize AI clients
-const openai = process.env.OPENAI_API_KEY 
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null
+// Credit rates per model (credits per 1K tokens)
+const CREDIT_RATES: Record<string, number> = {
+  // OpenAI
+  'gpt-4-turbo-preview': 10,
+  'gpt-4': 30,
+  'gpt-3.5-turbo': 1,
+  // Anthropic
+  'claude-opus-4-20240307': 15,
+  'claude-sonnet-4-20250514': 3,
+  'claude-haiku-3-20250514': 1,
+  // MiniMax
+  'abab6.5s-chat': 1,
+  'abab6.5-chat': 1,
+};
 
-const anthropic = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null
-
-// MiniMax API configuration
-const MINIMAX_API_URL = 'https://api.minimax.chat/v1/text/chatcompletion_v2'
-const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY
-
-// POST /api/chat/completions - Get AI response
+// POST /api/chat/completions - AI chat completion
 export async function POST(request: Request) {
-  const supabase = createClient()
-  
-  // Check authentication
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
-    const body = await request.json()
-    const { chat_id, message, provider, model, temperature, max_tokens } = body
-
-    if (!chat_id || !message) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: chat_id, message' 
-      }, { status: 400 })
+    const supabase = createClient();
+    
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized - Please sign in to use AI features' },
+        { status: 401 }
+      );
     }
 
-    // Verify chat ownership and get existing messages
-    const { data: chat } = await supabase
-      .from('chats')
-      .select('*')
-      .eq('id', chat_id)
+    const body = await request.json();
+    const { messages, provider, model, chatId } = body;
+
+    // Validate required fields
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json(
+        { error: 'Messages array is required' },
+        { status: 400 }
+      );
+    }
+
+    // Get the AI client
+    const selectedProvider: Provider = (provider as Provider) || 'openai';
+    const selectedModel = model || MODELS[selectedProvider]?.[0]?.id || 'gpt-4-turbo-preview';
+
+    // Check if API key is configured
+    const apiKeyConfigured = 
+      (selectedProvider === 'openai' && process.env.OPENAI_API_KEY) ||
+      (selectedProvider === 'anthropic' && process.env.ANTHROPIC_API_KEY) ||
+      (selectedProvider === 'minimax' && process.env.MINIMAX_API_KEY);
+
+    if (!apiKeyConfigured) {
+      return NextResponse.json(
+        { error: `API key not configured for ${selectedProvider}` },
+        { status: 503 }
+      );
+    }
+
+    // Check user credits
+    const { data: userCredits } = await supabase
+      .from('user_credits')
+      .select('credits_balance')
       .eq('user_id', user.id)
-      .single()
+      .single();
 
-    if (!chat) {
-      return NextResponse.json({ error: 'Chat not found' }, { status: 404 })
+    // Estimate credits needed (pre-check)
+    const estimatedCredits = Math.ceil(CREDIT_RATES[selectedModel] || 5);
+    
+    if (!userCredits || userCredits.credits_balance < estimatedCredits) {
+      return NextResponse.json(
+        { 
+          error: 'Insufficient credits',
+          code: 'INSUFFICIENT_CREDITS',
+          required: estimatedCredits,
+          current: userCredits?.credits_balance || 0,
+        },
+        { status: 402 }
+      );
     }
 
-    // Get conversation history
-    const { data: messages } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('chat_id', chat_id)
-      .order('created_at', { ascending: true })
+    // Get AI client and make the request
+    const aiClient = getAIClient(selectedProvider, selectedModel);
+    
+    const response = await aiClient.complete(messages, {
+      temperature: 0.7,
+      maxTokens: 4096,
+    });
 
-    // Build messages array for AI
-    const conversationMessages = [
-      ...(messages?.map(m => ({
-        role: m.role as 'system' | 'user' | 'assistant',
-        content: m.content
-      })) || []),
-      { role: 'user', content: message }
-    ]
+    // Calculate actual credits used
+    const inputTokens = response.usage?.inputTokens || 0;
+    const outputTokens = response.usage?.outputTokens || 0;
+    const totalTokens = inputTokens + outputTokens;
+    const creditsUsed = Math.ceil((totalTokens / 1000) * (CREDIT_RATES[selectedModel] || 5));
 
-    // Determine provider and model
-    const selectedProvider = provider || chat.provider || 'openai'
-    const selectedModel = model || chat.model || 'gpt-4-turbo-preview'
-    const selectedTemp = temperature || 0.7
-    const selectedMaxTokens = max_tokens || 4096
+    // Deduct credits
+    const { error: deductError } = await supabase
+      .rpc('deduct_credits', {
+        p_user_id: user.id,
+        p_amount: creditsUsed,
+        p_description: `AI request: ${selectedModel}`,
+      });
 
-    let aiResponse: string
-
-    try {
-      switch (selectedProvider) {
-        case 'openai':
-          if (!openai) {
-            throw new Error('OpenAI API key not configured')
-          }
-          aiResponse = await getOpenAIResponse(openai, selectedModel, conversationMessages, selectedTemp, selectedMaxTokens)
-          break
-
-        case 'anthropic':
-          if (!anthropic) {
-            throw new Error('Anthropic API key not configured')
-          }
-          aiResponse = await getAnthropicResponse(anthropic, selectedModel, conversationMessages, selectedTemp, selectedMaxTokens)
-          break
-
-        case 'minimax':
-          if (!MINIMAX_API_KEY) {
-            throw new Error('MiniMax API key not configured')
-          }
-          aiResponse = await getMiniMaxResponse(conversationMessages, selectedModel, selectedTemp, selectedMaxTokens)
-          break
-
-        default:
-          throw new Error(`Unsupported provider: ${selectedProvider}`)
-      }
-    } catch (aiError: any) {
-      // Return error if AI providers fail
-      return NextResponse.json({ error: aiError.message }, { status: 500 })
+    if (deductError) {
+      console.error('Error deducting credits:', deductError);
+      // Continue anyway - credits will be reconciled later
     }
 
-    // Save user message
-    const { data: userMsg } = await supabase
-      .from('messages')
-      .insert({
-        chat_id,
-        role: 'user',
-        content: message,
-        provider: selectedProvider,
-        model: selectedModel,
-      })
-      .select()
-      .single()
-
-    // Save AI response
-    const { data: assistantMsg } = await supabase
-      .from('messages')
-      .insert({
-        chat_id,
-        role: 'assistant',
-        content: aiResponse,
-        provider: selectedProvider,
-        model: selectedModel,
-      })
-      .select()
-      .single()
+    // Log usage for analytics
+    if (response.usage) {
+      await supabase
+        .from('ai_usage')
+        .insert({
+          user_id: user.id,
+          provider: selectedProvider,
+          model: selectedModel,
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          credits_deducted: creditsUsed,
+          cost_pence: 0, // Could calculate actual cost based on provider pricing
+        });
+    }
 
     return NextResponse.json({
-      userMessage: userMsg,
-      assistantMessage: assistantMsg,
-    })
-
+      content: response.content,
+      provider: selectedProvider,
+      model: selectedModel,
+      usage: response.usage,
+      credits_used: creditsUsed,
+    });
   } catch (error) {
-    console.error('Chat completion error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('AI Completion Error:', error);
+    
+    return NextResponse.json(
+      { 
+        error: error instanceof Error ? error.message : 'AI request failed',
+        details: process.env.NODE_ENV === 'development' ? String(error) : undefined,
+      },
+      { status: 500 }
+    );
   }
-}
-
-// OpenAI response helper
-async function getOpenAIResponse(
-  client: OpenAI,
-  model: string,
-  messages: Array<{ role: string; content: string }>,
-  temperature: number,
-  maxTokens: number
-): Promise<string> {
-  const response = await client.chat.completions.create({
-    model,
-    messages: messages as any,
-    temperature,
-    max_tokens: maxTokens,
-    stream: false,
-  })
-
-  return response.choices[0]?.message?.content || 'No response generated'
-}
-
-// Anthropic response helper
-async function getAnthropicResponse(
-  client: Anthropic,
-  model: string,
-  messages: Array<{ role: string; content: string }>,
-  temperature: number,
-  maxTokens: number
-): Promise<string> {
-  const response = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
-    temperature,
-    messages: messages as any,
-  })
-
-  return response.content[0]?.type === 'text' 
-    ? response.content[0].text 
-    : 'No response generated'
-}
-
-// MiniMax response helper
-async function getMiniMaxResponse(
-  messages: Array<{ role: string; content: string }>,
-  model: string,
-  temperature: number,
-  maxTokens: number
-): Promise<string> {
-  const response = await fetch(MINIMAX_API_URL!, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${MINIMAX_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: messages.map(m => ({
-        role: m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-        content: m.content
-      })),
-      temperature,
-      max_output_tokens: maxTokens,
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`MiniMax API error: ${error}`)
-  }
-
-  const data = await response.json()
-  return data.choices?.[0]?.message?.content || 'No response generated'
 }
