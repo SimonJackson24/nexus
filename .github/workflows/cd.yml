@@ -72,12 +72,14 @@ jobs:
             # Login to container registry
             echo "🔐 Logging into container registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            # Pull the pre-built image from CI
-            echo "🐳 Pulling Docker image..."
-            docker compose pull nexus
-            # Restart services with new image
-            echo "🔄 Restarting services..."
-            docker compose up -d --no-build
+            # Pull latest code changes
+            echo "📦 Pulling latest code..."
+            git fetch origin main
+            git checkout main
+            git pull origin main
+            # Rebuild and restart services
+            echo "🔄 Rebuilding and restarting services..."
+            docker compose up -d --build
             # Wait for healthy
             echo "⏳ Waiting for container to be healthy..."
             sleep 20
