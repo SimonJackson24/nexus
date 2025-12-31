@@ -121,7 +121,10 @@ KONGEOF
 
 # Copy schema files
 mkdir -p schema
-cp ${NEXUS_DIR}/nexus/supabase-schema.sql schema/schema.sql
+cp ${NEXUS_DIR}/nexus/supabase/schema-hybrid.sql schema/schema.sql
+
+# Also copy original for fallback
+cp ${NEXUS_DIR}/nexus/supabase/schema.sql schema/schema-original.sql 2>/dev/null || true
 
 # Start services
 docker compose down || true

@@ -140,6 +140,10 @@ print_success "Generated operator token"
 SECRETS["NEXUS_SECRET_KEY"]=$(generate_password 32)
 print_success "Generated Nexus secret key"
 
+# API Key encryption key (for BYOK)
+SECRETS["API_KEY_ENCRYPTION_KEY"]=$(generate_hex 32)
+print_success "Generated API key encryption key"
+
 # Supabase keys
 SECRETS["NEXT_PUBLIC_SUPABASE_ANON_KEY"]="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.$(generate_hex 32)"
 print_success "Generated Supabase anon key"
@@ -246,6 +250,11 @@ done
 
 ENV_CONTENT+="
 # ========================================
+# BYOK Encryption Key
+# ========================================
+API_KEY_ENCRYPTION_KEY=${SECRETS[API_KEY_ENCRYPTION_KEY]}
+
+# ========================================
 # Development Settings
 # ========================================
 NODE_ENV=production
@@ -334,11 +343,82 @@ EOF
     print_section "Initializing Database"
 
     print_info "Running database schema..."
-    SCHEMA_FILE="$PROJECT_ROOT/nexus/supabase/schema.sql"
-    if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_FILE" 2>&1 | tail -5; then
+    SCHEMA_DIR="$PROJECT_ROOT/nexus/supabase"
+
+    # Run schema files in order
+    if [ -f "$SCHEMA_DIR/schema-hybrid.sql" ]; then
+      print_info "Running schema-hybrid.sql..."
+      if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_DIR/schema-hybrid.sql" 2>&1 | tail -10; then
         print_success "Database schema initialized"
+      else
+        print_warning "Schema may already exist"
+      fi
+    fi
+
+    # Run GitHub integration schema
+    if [ -f "$SCHEMA_DIR/schema-github.sql" ]; then
+      print_info "Running schema-github.sql..."
+      if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_DIR/schema-github.sql" 2>&1 | tail -5; then
+        print_success "GitHub schema initialized"
+      else
+        print_warning "GitHub schema may already exist"
+      fi
+    fi
+
+    # Run GitHub extended schema
+    if [ -f "$SCHEMA_DIR/schema-github-extended.sql" ]; then
+      print_info "Running schema-github-extended.sql..."
+      if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_DIR/schema-github-extended.sql" 2>&1 | tail -5; then
+        print_success "GitHub extended schema initialized"
+      else
+        print_warning "GitHub extended schema may already exist"
+      fi
+    fi
+
+    # Run seed functions
+    SEED_FILE="$SCHEMA_DIR/seed-admin.sql"
+    if [ -f "$SEED_FILE" ]; then
+      print_info "Running admin seed functions..."
+      docker exec -i nexus-postgres psql -U postgres -d postgres < "$SEED_FILE" 2>&1 | tail -5 || true
+    fi
+
+    # Create default admin user if not exists
+    print_section "Creating Admin User"
+
+    ADMIN_EMAIL="${ADMIN_EMAIL:-admin@nexus.local}"
+    ADMIN_PASSWORD=$(generate_password 16)
+
+    # Check if admin user already exists
+    EXISTING_ADMIN=$(docker exec nexus-postgres psql -U postgres -d postgres -t -c "SELECT email FROM auth.users WHERE email = '$ADMIN_EMAIL';" 2>/dev/null || echo "")
+
+    if [ -z "$EXISTING_ADMIN" ]; then
+      print_info "Creating default admin user: $ADMIN_EMAIL"
+
+      # Generate admin user via API call
+      KONG_URL="${KONG_URL:-http://localhost:8000}"
+      SERVICE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}"
+
+      if [ -n "$SERVICE_KEY" ]; then
+        # Try to create admin via Supabase Auth Admin API
+        curl -s -X POST "$KONG_URL/auth/v1/admin/users" \
+          -H "Authorization: Bearer $SERVICE_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{\"email\": \"$ADMIN_EMAIL\", \"password\": \"$ADMIN_PASSWORD\", \"email_confirm\": true, \"user_metadata\": {\"is_admin\": true, \"force_password_change\": true}}" > /dev/null 2>&1 || true
+
+        print_success "Admin user created!"
+        print_warning "IMPORTANT: Save these credentials!"
+        echo ""
+        echo -e "${BOLD}Admin Login Credentials:${RESET}"
+        echo -e "  Email: ${GREEN}$ADMIN_EMAIL${RESET}"
+        echo -e "  Password: ${GREEN}$ADMIN_PASSWORD${RESET}"
+        echo ""
+        echo -e "${YELLOW}You MUST change the password on first login!${RESET}"
+      else
+        print_warning "SERVICE_KEY not set - skipping admin creation"
+        print_info "Run scripts/create-admin.sh manually after deployment"
+      fi
     else
-        print_warning "Schema initialization had issues (may already exist)"
+      print_success "Admin user already exists"
     fi
 fi
 
@@ -375,6 +455,7 @@ echo ""
 echo -e "${BOLD}Security Credentials (Save These!):${RESET}"
 echo -e "  JWT Secret: ${GREEN}${SECRETS[JWT_SECRET]}${RESET}"
 echo -e "  Nexus Secret: ${GREEN}${SECRETS[NEXUS_SECRET_KEY]}${RESET}"
+echo -e "  API Key Encryption: ${GREEN}${SECRETS[API_KEY_ENCRYPTION_KEY]}${RESET}"
 echo -e "  Operator Token: ${GREEN}${SECRETS[OPERATOR_TOKEN]}${RESET}"
 echo ""
 
