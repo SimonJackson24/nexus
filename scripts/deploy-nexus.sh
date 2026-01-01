@@ -12,7 +12,7 @@ cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
 echo "Creating .env file..."
 NEXUS_SECRET_KEY=${NEXUS_SECRET_KEY:-$(openssl rand -base64 32)}
 
-cat > .env << HEREDOC_END
+cat > .env << EOF
 # ================================================
 # Nexus Environment Variables
 # ================================================
@@ -38,12 +38,16 @@ SMTP_HOST=${SMTP_HOST}
 SMTP_PORT=${SMTP_PORT}
 SMTP_USER=${SMTP_USER}
 SMTP_PASS=${SMTP_PASS}
-HEREDOC_END
+EOF
 
 echo ".env file created"
 
 echo "Logging into container registry..."
-echo "$GHCR_TOKEN" | docker login ghcr.io -u $USERNAME --password-stdin
+if [ -n "$GHCR_TOKEN" ]; then
+  echo "$GHCR_TOKEN" | docker login ghcr.io -u "$USERNAME" --password-stdin
+else
+  echo "Warning: GHCR_TOKEN not set, attempting anonymous pull"
+fi
 
 FIRST_DEPLOY=false
 if [ ! -f .deployed ]; then
