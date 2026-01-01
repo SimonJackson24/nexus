@@ -56,7 +56,7 @@ git pull origin main
 
 echo "Starting services..."
 docker compose --env-file .env pull
-docker compose --env-file .env up -d --build
+docker compose --env-file .env up -d --build --remove-orphans
 
 echo "Waiting for healthy..."
 sleep 30
