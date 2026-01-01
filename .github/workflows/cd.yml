@@ -33,37 +33,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Generate Supabase keys
-        id: supabase-keys
-        run: |
-          if [ -z "${{ secrets.JWT_SECRET }}" ]; then
-            echo "JWT_SECRET=$(openssl rand -base64 32)" >> $GITHUB_OUTPUT
-          else
-            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> $GITHUB_OUTPUT
-          fi
-          echo "ANON_KEY=placeholder" >> $GITHUB_OUTPUT
-          echo "SERVICE_KEY=placeholder" >> $GITHUB_OUTPUT
-
       - name: Build and push Docker image
         env:
           USERNAME: ${{ github.actor }}
-          JWT_SECRET: ${{ steps.supabase-keys.outputs.JWT_SECRET }}
-          ANON_KEY: ${{ steps.supabase-keys.outputs.ANON_KEY }}
-          SERVICE_KEY: ${{ steps.supabase-keys.outputs.SERVICE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           REGISTRY="ghcr.io/${USERNAME,,}"
           IMAGE_NAME="nexus"
-          echo "JWT_SECRET=$JWT_SECRET" > .env
-          echo "NEXT_PUBLIC_SUPABASE_URL=http://kong:8000" >> .env
-          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY" >> .env
-          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_KEY" >> .env
-          echo "POSTGRES_PASSWORD=postgres" >> .env
+          # Write Supabase config to .env file for build args
+          echo "NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL" > .env.build
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env.build
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY" >> .env.build
           docker build -t $REGISTRY/$IMAGE_NAME:latest \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL=http://kong:8000 \
-            --build-arg SUPABASE_SERVICE_ROLE_KEY=$SERVICE_KEY \
-            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL \
+            --build-arg SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
-            --build-arg JWT_SECRET=$JWT_SECRET \
             .
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u $USERNAME --password-stdin
           docker push $REGISTRY/$IMAGE_NAME:latest

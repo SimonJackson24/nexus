@@ -1,131 +1,33 @@
 # ============================================
 # Nexus - Docker Compose Configuration
-# Self-hosted Supabase + Next.js Application
+# Next.js Application with External Supabase VM
 # ============================================
 
 services:
   # ========================================
-  # PostgreSQL Database
-  # ========================================
-  postgres:
-    image: postgres:15-alpine
-    container_name: nexus-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: postgres
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - nexus-network
-    restart: unless-stopped
-
-  # ========================================
-  # GoTrue (Auth Service)
-  # ========================================
-  gotrue:
-    image: supabase/gotrue:v2.149.0
-    container_name: nexus-gotrue
-    depends_on:
-      - postgres
-    environment:
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres?sslmode=disable
-      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
-      GOTRUE_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key}
-      GOTRUE_JWT_EXP: ${JWT_EXP:-3600}
-      GOTRUE_REFRESH_TOKEN_REUSE_INTERVAL: ${REFRESH_TOKEN_REUSE_INTERVAL:-10}
-      GOTRUE_OPERATOR_TOKEN: ${OPERATOR_TOKEN:-operator-token}
-      GOTRUE_GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
-      GOTRUE_GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
-      ENABLE_EMAIL_SIGNUP: ${ENABLE_EMAIL_SIGNUP:-true}
-      ENABLE_EMAIL_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-false}
-      SMTP_HOST: ${SMTP_HOST:-smtp}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Nexus}
-      SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-admin@example.com}
-    ports:
-      - "9999:9999"
-    networks:
-      - nexus-network
-    restart: unless-stopped
-
-  # ========================================
-  # PostgREST (REST API)
-  # ========================================
-  postgrest:
-    image: postgrest/postgrest:v12.0.2
-    container_name: nexus-postgrest
-    depends_on:
-      - postgres
-    environment:
-      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres?sslmode=disable
-      PGRST_DB_SCHEMAS: public, auth, storage
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_SERVER_PORT: 3001
-    ports:
-      - "3001:3001"
-    networks:
-      - nexus-network
-    restart: unless-stopped
-
-  # ========================================
-  # Kong API Gateway
-  # ========================================
-  kong:
-    image: kong:3.5
-    container_name: nexus-kong
-    depends_on:
-      - gotrue
-      - postgrest
-    environment:
-      KONG_DATABASE: off
-      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
-      KONG_PROXY_LISTEN: 0.0.0.0:8000
-      KONG_PROXY_LISTEN_SSL: 0.0.0.0:8443
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001
-    volumes:
-      - ./supabase/kong.yml:/kong/kong.yml:ro
-    ports:
-      - "8100:8000"
-      - "8101:8001"
-    networks:
-      - nexus-network
-    restart: unless-stopped
-
-  # ========================================
   # Nexus Next.js Application
   # ========================================
+  # NOTE: Supabase is running on a dedicated VM
+  # Get Supabase URL and keys from: ~/supabase-simple/.env on the VM
   nexus:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: nexus-app
-    depends_on:
-      - postgres
     environment:
-      # Supabase Configuration (use internal Docker network hostname)
-      NEXT_PUBLIC_SUPABASE_URL: http://kong:8000
+      # Supabase Configuration (from dedicated VM)
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      
-      # Database URL (direct connection for server-side)
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres?sslmode=disable
-      
+
+      # Database URL (direct connection to VM Supabase)
+      DATABASE_URL: ${DATABASE_URL}
+
       # AI Provider API Keys
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
-      
+
       # Application Settings
       NODE_ENV: production
       NEXUS_SECRET_KEY: ${NEXUS_SECRET_KEY}
@@ -133,8 +35,6 @@ services:
       - "3011:3000"
     volumes:
       - nexus-uploads:/app/uploads
-    networks:
-      - nexus-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
@@ -153,24 +53,13 @@ services:
       - redis_data:/data
     ports:
       - "6379:6379"
-    networks:
-      - nexus-network
     restart: unless-stopped
 
 # ========================================
 # Volumes
 # ========================================
 volumes:
-  postgres_data:
-    driver: local
   redis_data:
     driver: local
   nexus-uploads:
     driver: local
-
-# ========================================
-# Networks
-# ========================================
-networks:
-  nexus-network:
-    driver: bridge
