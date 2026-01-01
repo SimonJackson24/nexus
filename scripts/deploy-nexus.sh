@@ -8,38 +8,39 @@ echo "=========================================="
 
 cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
 
-# Check if .env exists, create with VM Supabase settings if not
-if [ ! -f .env ]; then
-  echo "Creating .env file with VM Supabase configuration..."
-  NEXUS_SECRET_KEY=$(openssl rand -base64 32)
-  cat > .env << 'HEREDOC_END'
+# Create .env file with Supabase configuration from environment variables
+echo "Creating .env file..."
+NEXUS_SECRET_KEY=${NEXUS_SECRET_KEY:-$(openssl rand -base64 32)}
+
+cat > .env << HEREDOC_END
 # ================================================
 # Nexus Environment Variables
 # ================================================
-# NOTE: Supabase is running on a dedicated VM
-# Get values from the Supabase VM: ~/supabase-simple/.env
 
-# Supabase Configuration (from dedicated VM)
-NEXT_PUBLIC_SUPABASE_URL=http://your-supabase-vm-ip:8000
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-vm-supabase-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-vm-supabase-service-key
+# Supabase Configuration (from environment/GitHub Secrets)
+NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+
+# Database URL (from environment/GitHub Secrets)
+DATABASE_URL=${DATABASE_URL}
 
 # Application Secret
 NEXUS_SECRET_KEY=${NEXUS_SECRET_KEY}
 
-# AI Provider API Keys (get from respective dashboards)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-MINIMAX_API_KEY=
+# AI Provider API Keys
+OPENAI_API_KEY=${OPENAI_API_KEY}
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+MINIMAX_API_KEY=${MINIMAX_API_KEY}
 
 # Email (optional)
-SMTP_HOST=
-SMTP_PORT=
-SMTP_USER=
-SMTP_PASS=
+SMTP_HOST=${SMTP_HOST}
+SMTP_PORT=${SMTP_PORT}
+SMTP_USER=${SMTP_USER}
+SMTP_PASS=${SMTP_PASS}
 HEREDOC_END
-  echo ".env file created with placeholder values - update with VM Supabase keys"
-fi
+
+echo ".env file created"
 
 echo "Logging into container registry..."
 echo "$GHCR_TOKEN" | docker login ghcr.io -u $USERNAME --password-stdin
@@ -55,17 +56,7 @@ git fetch origin main
 git checkout main
 git pull origin main
 
-# NOTE: Supabase is now on a dedicated VM
-# No need to start local Supabase containers
-# Database migrations should be run on the VM directly if needed
-
-echo "Checking for schema changes..."
-if git diff --name-only origin/main | grep -q "supabase/schema"; then
-  echo "Schema changes detected - these should be applied to the VM Supabase:"
-  echo "  1. SSH into the Supabase VM"
-  echo "  2. Run: docker exec -i supabase-db psql -U postgres < path/to/schema.sql"
-  echo "  3. Or use Supabase Studio at http://vm-ip:8000"
-fi
+# NOTE: Supabase is on a dedicated VM - no local containers needed
 
 echo "Starting services..."
 docker compose pull
