@@ -70,7 +70,7 @@ jobs:
             export DATABASE_URL="${{ secrets.DATABASE_URL }}"
             export GHCR_TOKEN="${{ secrets.GHCR_TOKEN }}"
             export USERNAME="${{ github.actor }}"
-            bash scripts/deploy-nexus.sh
+            bash /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus/scripts/deploy-nexus.sh
 
   notify:
     name: Notify
