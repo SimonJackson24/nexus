@@ -72,6 +72,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT || 22 }}
           script: |
             cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
+            export GHCR_TOKEN="${GHCR_TOKEN}"
             export NEXT_PUBLIC_SUPABASE_URL="${SUPABASE_URL}"
             export NEXT_PUBLIC_SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}"
             export SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_KEY}"
