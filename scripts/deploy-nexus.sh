@@ -54,8 +54,17 @@ git fetch origin main
 git checkout main
 git pull origin main
 
+echo "Cleaning up stale containers..."
+docker compose down --remove-orphans 2>/dev/null || true
+# Force remove any stale containers that might be holding ports
+docker ps -a --filter "name=nexus-app" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+docker ps -a --filter "name=nexus-redis" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+
+# Prune any dangling networks that might be blocking
+docker network prune -f 2>/dev/null || true
+
 echo "Starting services..."
-docker compose --env-file .env down
+docker compose --env-file .env down 2>/dev/null || true
 docker compose --env-file .env pull
 docker compose --env-file .env up -d --build --remove-orphans
 
