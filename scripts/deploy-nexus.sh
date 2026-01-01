@@ -55,8 +55,8 @@ git checkout main
 git pull origin main
 
 echo "Starting services..."
-docker compose pull
-docker compose up -d --build
+docker compose --env-file .env pull
+docker compose --env-file .env up -d --build
 
 echo "Waiting for healthy..."
 sleep 30
