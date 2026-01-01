@@ -12,6 +12,7 @@ cd /home/nexus/htdocs/nexus.simoncallaghan.dev/nexus
 echo "Creating .env file..."
 NEXUS_SECRET_KEY=${NEXUS_SECRET_KEY:-$(openssl rand -base64 32)}
 
+# Use EOF (not quoted) to expand variables
 cat > .env << EOF
 # ================================================
 # Nexus Environment Variables
@@ -42,13 +43,6 @@ EOF
 
 echo ".env file created"
 
-echo "Logging into container registry..."
-if [ -n "$GHCR_TOKEN" ]; then
-  echo "$GHCR_TOKEN" | docker login ghcr.io -u "$USERNAME" --password-stdin
-else
-  echo "Warning: GHCR_TOKEN not set, attempting anonymous pull"
-fi
-
 FIRST_DEPLOY=false
 if [ ! -f .deployed ]; then
   FIRST_DEPLOY=true
@@ -59,8 +53,6 @@ echo "Pulling latest code..."
 git fetch origin main
 git checkout main
 git pull origin main
-
-# NOTE: Supabase is on a dedicated VM - no local containers needed
 
 echo "Starting services..."
 docker compose pull
