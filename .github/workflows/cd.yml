@@ -43,9 +43,9 @@ jobs:
           REGISTRY="ghcr.io/${USERNAME,,}"
           IMAGE_NAME="nexus"
           docker build -t $REGISTRY/$IMAGE_NAME:latest \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL \
-            --build-arg SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY \
-            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
+            --build-arg SUPABASE_URL=$SUPABASE_URL \
+            --build-arg SUPABASE_SERVICE_KEY=$SUPABASE_SERVICE_KEY \
+            --build-arg SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
             --build-arg NEXT_TELEMETRY_DISABLED=1 \
             .
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u $USERNAME --password-stdin

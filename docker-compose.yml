@@ -16,9 +16,9 @@ services:
     container_name: nexus-app
     environment:
       # Supabase Configuration (from dedicated VM)
-      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
 
       # Database URL (direct connection to VM Supabase)
       DATABASE_URL: ${DATABASE_URL}
