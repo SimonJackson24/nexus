@@ -55,6 +55,7 @@ git checkout main
 git pull origin main
 
 echo "Starting services..."
+docker compose --env-file .env down
 docker compose --env-file .env pull
 docker compose --env-file .env up -d --build --remove-orphans
 
