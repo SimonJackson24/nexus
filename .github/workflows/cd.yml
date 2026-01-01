@@ -37,8 +37,8 @@ jobs:
         env:
           USERNAME: ${{ github.actor }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           REGISTRY="ghcr.io/${USERNAME,,}"
           IMAGE_NAME="nexus"
@@ -65,8 +65,8 @@ jobs:
           envs: SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_SERVICE_KEY,DATABASE_URL,GHCR_TOKEN,USERNAME
           script: |
             export SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
-            export SUPABASE_ANON_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}"
-            export SUPABASE_SERVICE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+            export SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY }}"
+            export SUPABASE_SERVICE_KEY="${{ secrets.SUPABASE_SERVICE_KEY }}"
             export DATABASE_URL="${{ secrets.DATABASE_URL }}"
             export GHCR_TOKEN="${{ secrets.GHCR_TOKEN }}"
             export USERNAME="${{ github.actor }}"
