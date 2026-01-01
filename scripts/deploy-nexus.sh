@@ -60,6 +60,24 @@ docker compose down --remove-orphans 2>/dev/null || true
 docker ps -a --filter "name=nexus-app" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
 docker ps -a --filter "name=nexus-redis" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
 
+# Find and kill any container using port 6380
+echo "Checking for containers using port 6380..."
+for cid in $(docker ps --format '{{.ID}}' 2>/dev/null); do
+  ports=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{$p}}{{end}}' "$cid" 2>/dev/null || echo "")
+  if echo "$ports" | grep -q "6380"; then
+    echo "Found container $cid using port 6380, removing..."
+    docker rm -f "$cid" 2>/dev/null || true
+  fi
+done
+
+# Kill any process using port 6380 (non-Docker)
+echo "Checking for processes using port 6380..."
+if command -v lsof >/dev/null 2>&1; then
+  lsof -ti:6380 | xargs -r kill -9 2>/dev/null || true
+elif command -v fuser >/dev/null 2>&1; then
+  fuser -k 6380/tcp 2>/dev/null || true
+fi
+
 # Prune any dangling networks that might be blocking
 docker network prune -f 2>/dev/null || true
 
