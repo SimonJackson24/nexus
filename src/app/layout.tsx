@@ -87,6 +87,16 @@ export default function RootLayout({
   return (
     <html lang="en" className="scroll-smooth">
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.ENV = {
+                NEXT_PUBLIC_SUPABASE_URL: ${process.env.NEXT_PUBLIC_SUPABASE_URL ? `"${process.env.NEXT_PUBLIC_SUPABASE_URL}"` : 'undefined'},
+                NEXT_PUBLIC_SUPABASE_ANON_KEY: ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? `"${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}"` : 'undefined'},
+              };
+            `,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://api.supabase.com" />
