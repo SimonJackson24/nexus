@@ -90,10 +90,14 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              window.ENV = {
-                NEXT_PUBLIC_SUPABASE_URL: ${process.env.NEXT_PUBLIC_SUPABASE_URL ? `"${process.env.NEXT_PUBLIC_SUPABASE_URL}"` : 'undefined'},
-                NEXT_PUBLIC_SUPABASE_ANON_KEY: ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? `"${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}"` : 'undefined'},
-              };
+              (function() {
+                var url = "${process.env.NEXT_PUBLIC_SUPABASE_URL || ''}";
+                var key = "${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}";
+                window.ENV = {
+                  NEXT_PUBLIC_SUPABASE_URL: url,
+                  NEXT_PUBLIC_SUPABASE_ANON_KEY: key,
+                };
+              })();
             `,
           }}
         />
