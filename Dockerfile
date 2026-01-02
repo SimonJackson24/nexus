@@ -81,6 +81,12 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# Supabase environment variables (must be available at runtime)
+# These can be overridden by docker-compose environment section
+ENV SUPABASE_URL=${SUPABASE_URL}
+ENV SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+ENV SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
