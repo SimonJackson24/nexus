@@ -67,7 +67,7 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 # Copy entrypoint script
 COPY --from=builder /app/scripts/entrypoint.sh /entrypoint.sh
-RUN chown root:root /entrypoint.sh && chmod +x /entrypoint.sh
+RUN apk add --no-cache dos2unix && dos2unix /entrypoint.sh && rm $(which dos2unix) && chown root:root /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Set ownership
 RUN chown -R nextjs:nodejs /app
