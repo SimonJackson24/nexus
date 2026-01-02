@@ -82,9 +82,9 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # Supabase environment variables (must be available at runtime)
-# These can be overridden by docker-compose environment section
-ENV SUPABASE_URL=${SUPABASE_URL}
-ENV SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+# NEXT_PUBLIC_ prefix required for client-side access
+ENV NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
 ENV SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
 
 # Health check

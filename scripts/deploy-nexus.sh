@@ -19,8 +19,8 @@ cat > .env << EOF
 # ================================================
 
 # Supabase Configuration (from environment/GitHub Secrets)
-SUPABASE_URL=${SUPABASE_URL}
-SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
 SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
 
 # Database URL (from environment/GitHub Secrets)
