@@ -1,23 +1,39 @@
 import { createBrowserClient } from '@supabase/ssr';
 import { SupabaseClient, User } from '@supabase/supabase-js';
+import fs from 'fs';
+import path from 'path';
 
-// Get environment variables from window.ENV (injected by layout.tsx)
-function getEnv(name: string): string {
-  if (typeof window !== 'undefined' && (window as any).ENV) {
-    return (window as any).ENV[name] || '';
+// Read config from file
+function getConfig() {
+  try {
+    const configPath = path.join(process.cwd(), '.env.nexus');
+    if (fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf8');
+      const config: Record<string, string> = {};
+      content.split('\n').forEach((line) => {
+        const [key, ...valueParts] = line.split('=');
+        if (key && valueParts.length > 0) {
+          config[key.trim()] = valueParts.join('=').trim();
+        }
+      });
+      return config;
+    }
+  } catch (error) {
+    console.error('Error reading config file:', error);
   }
-  return process.env[name] || '';
+  return {};
 }
 
+const config = getConfig();
+
 export function createClient(): SupabaseClient {
-  const supabaseUrl = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const supabaseAnonKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  
+  const supabaseUrl = config.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseAnonKey = config.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('Missing Supabase configuration:', { supabaseUrl, supabaseAnonKey });
-    throw new Error('Supabase URL and API key are required');
+    throw new Error('Supabase URL and API key are required. Please configure at /install');
   }
-  
+
   return createBrowserClient(supabaseUrl, supabaseAnonKey);
 }
 
@@ -55,4 +71,24 @@ export async function signUpWithEmail(
 
 export async function signOut(supabase: SupabaseClient) {
   return supabase.auth.signOut();
+}
+
+// Server-side client for server components
+export function createServerClient() {
+  const supabaseUrl = config.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseAnonKey = config.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const serviceKey = config.SUPABASE_SERVICE_KEY || '';
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
+  const { createServerClient } = require('@supabase/ssr');
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      get(name: string) {
+        return null; // Server components don't have cookies
+      },
+    },
+  });
 }
