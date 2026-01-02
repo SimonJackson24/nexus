@@ -37,6 +37,7 @@ COPY package.json .
 COPY postcss.config.mjs .
 COPY tailwind.config.ts .
 COPY tsconfig.json .
+COPY scripts/ ./scripts/
 
 # Copy source and public
 COPY public ./public
