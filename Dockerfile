@@ -65,6 +65,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 # Copy static files
 COPY --from=builder /app/.next/static ./.next/static
+# Copy entrypoint script
+COPY --from=builder /app/scripts/entrypoint.sh /entrypoint.sh
+RUN chown root:root /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Set ownership
 RUN chown -R nextjs:nodejs /app
@@ -89,10 +92,6 @@ ARG SUPABASE_SERVICE_KEY
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 ENV SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-
-# Copy entrypoint script
-COPY --from=builder /app/scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
