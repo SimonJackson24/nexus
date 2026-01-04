@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
 
 // GET /api/chat/completions - Get available models and providers
 export async function GET() {
@@ -15,29 +16,21 @@ export async function GET() {
 
 // POST /api/chat/completions - Handle chat completions with credits system
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabaseAdmin = getSupabaseService() as any;
-    
-    // Get user from token
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     // Get user subscription with credits from database
-    const { data: subscription } = await supabaseAdmin
-      .from('user_subscriptions')
-      .select('credits_balance')
-      .eq('user_id', user.id)
-      .single();
+    const subscriptionResult = await query(
+      'SELECT credits_balance FROM user_subscriptions WHERE user_id = $1',
+      [userId]
+    );
 
+    const subscription = subscriptionResult.rows[0];
     const availableCredits = subscription?.credits_balance ?? 0;
+
     if (availableCredits <= 0) {
       return NextResponse.json(
         { error: 'Insufficient credits. Please purchase more credits to continue.' },
@@ -61,11 +54,11 @@ export async function POST(request: NextRequest) {
 
     // Calculate and deduct credits (simplified: 1 credit per message)
     const creditsToDeduct = Math.max(1, Math.ceil(messages.length / 2));
-    
-    await supabaseAdmin
-      .from('user_subscriptions')
-      .update({ credits_balance: availableCredits - creditsToDeduct })
-      .eq('user_id', user.id);
+
+    await query(
+      'UPDATE user_subscriptions SET credits_balance = credits_balance - $1 WHERE user_id = $2',
+      [creditsToDeduct, userId]
+    );
 
     // Create a ReadableStream for the response (simplified - returns basic response)
     const readableStream = new ReadableStream({

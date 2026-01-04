@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
 import {
   listWorkflows,
   listWorkflowRuns,
@@ -10,22 +10,13 @@ import {
 
 // GET /api/github/actions - List workflows and runs
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService();
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const searchParams = request.nextUrl.searchParams;
+    const { searchParams } = new URL(request.url);
     const repo = searchParams.get('repo');
     const workflowId = searchParams.get('workflow_id');
     const branch = searchParams.get('branch');
@@ -41,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     // List workflows
     if (!workflowId) {
-      const workflows = await listWorkflows(user.id, owner, repoName);
+      const workflows = await listWorkflows(userId!, owner, repoName);
 
       return NextResponse.json({
         repo,
@@ -57,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     // List workflow runs
-    const runs = await listWorkflowRuns(user.id, owner, repoName, {
+    const runs = await listWorkflowRuns(userId!, owner, repoName, {
       workflowId: parseInt(workflowId),
       branch: branch || undefined,
       status: status || undefined,
@@ -78,7 +69,7 @@ export async function GET(request: NextRequest) {
         conclusion: run.conclusion,
         branch: run.head_branch,
         event: run.event,
-        actor: run.actor.login,
+        actor: run.actor?.login,
         created_at: run.created_at,
         updated_at: run.updated_at,
         run_started_at: run.run_started_at,
@@ -94,21 +85,12 @@ export async function GET(request: NextRequest) {
 
 // POST /api/github/actions - Trigger workflow, cancel, rerun
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService();
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { action, repo, workflow_id, ref, inputs, run_id } = body;
 
@@ -121,7 +103,7 @@ export async function POST(request: NextRequest) {
     // Trigger workflow dispatch
     if (action === 'trigger' && workflow_id) {
       const success = await triggerWorkflow(
-        user.id,
+        userId!,
         owner,
         repoName,
         parseInt(workflow_id),
@@ -141,7 +123,7 @@ export async function POST(request: NextRequest) {
 
     // Cancel workflow run
     if (action === 'cancel' && run_id) {
-      const success = await cancelWorkflowRun(user.id, owner, repoName, parseInt(run_id));
+      const success = await cancelWorkflowRun(userId!, owner, repoName, parseInt(run_id));
 
       if (!success) {
         return NextResponse.json({ error: 'Failed to cancel workflow' }, { status: 500 });
@@ -155,7 +137,7 @@ export async function POST(request: NextRequest) {
 
     // Rerun workflow
     if (action === 'rerun' && run_id) {
-      const success = await rerunWorkflow(user.id, owner, repoName, parseInt(run_id));
+      const success = await rerunWorkflow(userId!, owner, repoName, parseInt(run_id));
 
       if (!success) {
         return NextResponse.json({ error: 'Failed to rerun workflow' }, { status: 500 });

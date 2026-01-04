@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
 import {
   listBranches,
   getBranch,
   createBranch,
   createOrUpdateFile,
   deleteFile,
-  listWorkflowRuns,
+  createPR,
 } from '@/lib/github/extended-api';
+import { query } from '@/lib/db';
 
 // Helper to encode content to base64
 function encodeContent(content: string): string {
@@ -17,42 +18,28 @@ function encodeContent(content: string): string {
 // GET /api/github/code - List branches or get pending changes
 // Query params: repo, branch, status (for pending changes)
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
 
     // If status is provided, return pending changes instead
     if (status) {
-      const { data: pendingChanges, error } = await supabase
-        .from('github_pending_changes')
-        .select(`
-          *,
-          repo:github_repos(repo_full_name)
-        `)
-        .eq('user_id', user.id)
-        .eq('status', status)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        return NextResponse.json({ error: 'Failed to fetch pending changes' }, { status: 500 });
-      }
+      const result = await query(
+        `SELECT gpc.*, gr.repo_full_name 
+         FROM github_pending_changes gpc
+         LEFT JOIN github_repos gr ON gpc.repo_id = gr.id
+         WHERE gpc.user_id = $1
+         ORDER BY gpc.created_at DESC`,
+        [userId]
+      );
 
       return NextResponse.json({
-        pending_changes: pendingChanges || [],
+        pending_changes: result.rows,
       });
     }
 
@@ -67,7 +54,7 @@ export async function GET(request: NextRequest) {
 
     // Get specific branch
     if (branch) {
-      const branchInfo = await getBranch(user.id, owner, repoName, branch);
+      const branchInfo = await getBranch(userId!, owner, repoName, branch);
 
       if (!branchInfo) {
         return NextResponse.json({ error: 'Branch not found' }, { status: 404 });
@@ -84,7 +71,7 @@ export async function GET(request: NextRequest) {
     }
 
     // List all branches
-    const branches = await listBranches(user.id, owner, repoName);
+    const branches = await listBranches(userId!, owner, repoName);
 
     return NextResponse.json({
       repo,
@@ -102,21 +89,12 @@ export async function GET(request: NextRequest) {
 
 // POST /api/github/code - Create branch, update files, create PR
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { action, repo, branch, from_branch, path, content, message, sha, file_action } = body;
 
@@ -129,12 +107,12 @@ export async function POST(request: NextRequest) {
     // Create a new branch
     if (action === 'create_branch' && branch && from_branch) {
       // Get the SHA of the source branch
-      const sourceBranch = await getBranch(user.id, owner, repoName, from_branch);
+      const sourceBranch = await getBranch(userId!, owner, repoName, from_branch);
       if (!sourceBranch) {
         return NextResponse.json({ error: 'Source branch not found' }, { status: 404 });
       }
 
-      const success = await createBranch(user.id, owner, repoName, branch, sourceBranch.commit.sha);
+      const success = await createBranch(userId!, owner, repoName, branch, sourceBranch.commit.sha);
 
       if (!success) {
         return NextResponse.json({ error: 'Failed to create branch' }, { status: 500 });
@@ -155,7 +133,7 @@ export async function POST(request: NextRequest) {
       // Get current file SHA if updating
       let currentSha: string | undefined;
       if (file_action === 'update' || file_action === 'delete') {
-        const branchInfo = await getBranch(user.id, owner, repoName, branch || 'main');
+        const branchInfo = await getBranch(userId!, owner, repoName, branch || 'main');
         if (!branchInfo) {
           return NextResponse.json({ error: 'Branch not found' }, { status: 404 });
         }
@@ -172,7 +150,7 @@ export async function POST(request: NextRequest) {
 
       if (file_action === 'delete') {
         const success = await deleteFile(
-          user.id,
+          userId!,
           owner,
           repoName,
           path,
@@ -192,7 +170,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const result = await createOrUpdateFile(user.id, owner, repoName, path, {
+      const result = await createOrUpdateFile(userId!, owner, repoName, path, {
         message,
         content: encodeContent(content),
         sha: currentSha,
@@ -215,18 +193,18 @@ export async function POST(request: NextRequest) {
     // Create a branch and update files in one transaction (AI workflow)
     if (action === 'suggest_changes' && branch && from_branch && path && content && message) {
       // First create the branch
-      const sourceBranch = await getBranch(user.id, owner, repoName, from_branch);
+      const sourceBranch = await getBranch(userId!, owner, repoName, from_branch);
       if (!sourceBranch) {
         return NextResponse.json({ error: 'Source branch not found' }, { status: 404 });
       }
 
-      const branchCreated = await createBranch(user.id, owner, repoName, branch, sourceBranch.commit.sha);
+      const branchCreated = await createBranch(userId!, owner, repoName, branch, sourceBranch.commit.sha);
       if (!branchCreated) {
         return NextResponse.json({ error: 'Failed to create branch' }, { status: 500 });
       }
 
       // Then create the file
-      const fileResult = await createOrUpdateFile(user.id, owner, repoName, path, {
+      const fileResult = await createOrUpdateFile(userId!, owner, repoName, path, {
         message,
         content: encodeContent(content),
         branch,
@@ -236,47 +214,46 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to update file' }, { status: 500 });
       }
 
-      // Store pending change for user approval
-      const { data: pendingChange, error: insertError } = await supabase
-        .from('github_pending_changes')
-        .insert({
-          user_id: user.id,
-          connection_id: (
-            await supabase
-              .from('github_connections')
-              .select('id')
-              .eq('user_id', user.id)
-              .single()
-          ).data?.id || '',
-          repo_id: (
-            await supabase
-              .from('github_repos')
-              .select('id')
-              .eq('repo_full_name', repo)
-              .single()
-          ).data?.id || '',
-          branch_name: branch,
-          file_path: path,
-          action: 'update',
-          original_sha: sha || sourceBranch.commit.sha,
-          new_sha: fileResult.sha,
-          change_summary: message,
-          diff_content: `--- a/${path}\n+++ b/${path}\n${content}`,
-          status: 'pending',
-        })
-        .select()
-        .single();
+      // Get connection and repo IDs
+      const connectionResult = await query(
+        'SELECT id FROM github_connections WHERE user_id = $1 LIMIT 1',
+        [userId]
+      );
 
-      if (insertError) {
-        console.error('Error storing pending change:', insertError);
-      }
+      const repoResult = await query(
+        'SELECT id FROM github_repos WHERE repo_full_name = $1 LIMIT 1',
+        [repo]
+      );
+
+      // Store pending change for user approval
+      const pendingResult = await query(
+        `INSERT INTO github_pending_changes 
+         (user_id, connection_id, repo_id, branch_name, file_path, action, original_sha, new_sha, 
+          change_summary, diff_content, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+         RETURNING *`,
+        [
+          userId,
+          connectionResult.rows[0]?.id || null,
+          repoResult.rows[0]?.id || null,
+          branch,
+          path,
+          'update',
+          sha || sourceBranch.commit.sha,
+          fileResult.sha,
+          message,
+          `--- a/${path}\n+++ b/${path}\n${content}`,
+        ]
+      );
+
+      const pendingChange = pendingResult.rows[0];
 
       return NextResponse.json({
         success: true,
         branch_created: branch,
         file_updated: path,
         pending_approval: true,
-        pending_id: pendingChange?.id,
+        pending_id: pendingChange.id,
         message: 'Changes created in new branch. Create a PR to merge when ready.',
         pr_template: {
           title: `AI: ${message}`,
@@ -296,21 +273,12 @@ export async function POST(request: NextRequest) {
 
 // PATCH /api/github/code - Approve or reject pending changes
 export async function PATCH(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { action, pending_id, pr_title, pr_body, pr_head, pr_base } = body;
 
@@ -319,14 +287,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Get the pending change
-    const { data: pendingChange, error: fetchError } = await supabase
-      .from('github_pending_changes')
-      .select('*')
-      .eq('id', pending_id)
-      .eq('user_id', user.id)
-      .single();
+    const pendingChangeResult = await query(
+      'SELECT * FROM github_pending_changes WHERE id = $1',
+      [pending_id]
+    );
 
-    if (fetchError || !pendingChange) {
+    const pendingChange = pendingChangeResult.rows[0];
+
+    if (!pendingChange || pendingChange.user_id !== userId) {
       return NextResponse.json({ error: 'Pending change not found' }, { status: 404 });
     }
 
@@ -337,21 +305,20 @@ export async function PATCH(request: NextRequest) {
     // Approve and create PR
     if (action === 'approve') {
       // Update pending change status
-      await supabase
-        .from('github_pending_changes')
-        .update({
-          status: 'approved',
-          approved_at: new Date().toISOString(),
-          approved_by: user.id,
-        })
-        .eq('id', pending_id);
+      await query(
+        `UPDATE github_pending_changes 
+         SET status = 'approved', approved_at = $1, approved_by = $2
+         WHERE id = $3`,
+        [new Date().toISOString(), userId, pending_id]
+      );
 
       // Get repo info
-      const { data: repo } = await supabase
-        .from('github_repos')
-        .select('repo_full_name')
-        .eq('id', pendingChange.repo_id)
-        .single();
+      const repoResult = await query(
+        'SELECT repo_full_name FROM github_repos WHERE id = $1',
+        [pendingChange.repo_id]
+      );
+
+      const repo = repoResult.rows[0];
 
       if (!repo) {
         return NextResponse.json({ error: 'Repo not found' }, { status: 404 });
@@ -359,9 +326,8 @@ export async function PATCH(request: NextRequest) {
 
       const [owner, repoName] = repo.repo_full_name.split('/');
 
-      // Create PR using the extended API
-      const { createPR } = await import('@/lib/github/extended-api');
-      const pr = await createPR(user.id, owner, repoName, {
+      // Create PR
+      const pr = await createPR(userId!, owner, repoName, {
         title: pr_title || `AI: ${pendingChange.change_summary}`,
         body: pr_body || `AI-generated changes.\n\n${pendingChange.change_summary}`,
         head: pr_head || pendingChange.branch_name,
@@ -384,13 +350,12 @@ export async function PATCH(request: NextRequest) {
 
     // Reject
     if (action === 'reject') {
-      await supabase
-        .from('github_pending_changes')
-        .update({
-          status: 'rejected',
-          approved_at: new Date().toISOString(),
-        })
-        .eq('id', pending_id);
+      await query(
+        `UPDATE github_pending_changes 
+         SET status = 'rejected', approved_at = $1
+         WHERE id = $2`,
+        [new Date().toISOString(), pending_id]
+      );
 
       return NextResponse.json({
         success: true,

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
 import { encryptApiKey } from '@/lib/billing/api-key-service';
 import { getGitHubUser } from '@/lib/github/api-service';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
 
 // GitHub OAuth configuration
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
@@ -42,8 +43,10 @@ export async function GET(request: NextRequest) {
 // OAuth callback handler
 export async function POST(request: NextRequest) {
   try {
-    const supabase = getSupabaseService() as any;
-    
+    const authResponse = await requireAuth(request);
+    if (authResponse) return authResponse;
+
+    const userId = request.headers.get('x-user-id');
     const body = await request.json();
     const { code, state } = body;
 
@@ -91,47 +94,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to get GitHub user info' }, { status: 500 });
     }
 
-    // Get authenticated user from Supabase
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     // Encrypt the access token
     const encryptedToken = encryptApiKey(accessToken);
 
-    // Store the connection
-    const { data: connection, error: insertError } = await supabase
-      .from('github_connections')
-      .upsert(
-        {
-          user_id: user.id,
-          github_user_id: githubUser.id,
-          github_username: githubUser.login,
-          github_avatar_url: githubUser.avatar_url,
-          access_token: encryptedToken,
-          scope: tokenData.scope || 'repo,read:user',
-          is_active: true,
-        },
-        {
-          onConflict: 'user_id, github_user_id',
-          ignoreDuplicates: false,
-        }
-      )
-      .select()
-      .single();
+    // Store the connection (upsert)
+    const result = await query(
+      `INSERT INTO github_connections 
+       (user_id, github_user_id, github_username, github_avatar_url, access_token, scope, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, true)
+       ON CONFLICT (user_id, github_user_id) 
+       DO UPDATE SET 
+         access_token = $5, 
+         github_avatar_url = $4, 
+         scope = $6, 
+         is_active = true, 
+         updated_at = $7
+       RETURNING *`,
+      [
+        userId,
+        githubUser.id,
+        githubUser.login,
+        githubUser.avatar_url,
+        encryptedToken,
+        tokenData.scope || 'repo,read:user',
+        new Date().toISOString(),
+      ]
+    );
 
-    if (insertError) {
-      console.error('Error storing GitHub connection:', insertError);
-      return NextResponse.json({ error: 'Failed to store GitHub connection' }, { status: 500 });
-    }
+    const connection = result.rows[0];
 
     // Clear the state cookie
     const response = NextResponse.json({

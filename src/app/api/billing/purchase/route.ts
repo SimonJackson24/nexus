@@ -1,21 +1,15 @@
-import { createClient } from '@/lib/supabase/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
 
 // POST /api/billing/purchase - Create a purchase order
-export async function POST(request: Request) {
-  try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
 
+  const userId = request.headers.get('x-user-id');
+
+  try {
     const body = await request.json();
     const { package_id, plan_id } = body;
 
@@ -29,19 +23,17 @@ export async function POST(request: Request) {
     // Get package or plan details
     let item;
     if (package_id) {
-      const { data: pkg } = await supabase
-        .from('credit_packages')
-        .select('*')
-        .eq('id', package_id)
-        .single();
-      item = pkg;
+      const result = await query(
+        'SELECT * FROM credit_packages WHERE id = $1',
+        [package_id]
+      );
+      item = result.rows[0];
     } else if (plan_id) {
-      const { data: plan } = await supabase
-        .from('subscription_tiers')
-        .select('*')
-        .eq('id', plan_id)
-        .single();
-      item = plan;
+      const result = await query(
+        'SELECT * FROM subscription_tiers WHERE id = $1',
+        [plan_id]
+      );
+      item = result.rows[0];
     }
 
     if (!item) {
@@ -52,37 +44,37 @@ export async function POST(request: Request) {
     }
 
     // Create payment record
-    const { data: payment, error: paymentError } = await supabase
-      .from('payments')
-      .insert({
-        user_id: user.id,
-        provider: 'revolut',
-        amount_pence: package_id ? item.price_pence : item.price_pence_monthly,
-        currency: item.currency || 'GBP',
-        status: 'pending',
-        metadata: {
+    const amountPence = package_id ? item.price_pence : item.price_pence_monthly;
+    const credits = package_id ? item.credits_amount : item.monthly_credits;
+
+    const result = await query(
+      `INSERT INTO payments (user_id, provider, amount_pence, currency, status, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        userId,
+        'revolut',
+        amountPence,
+        item.currency || 'GBP',
+        'pending',
+        JSON.stringify({
           package_id: package_id || null,
           plan_id: plan_id || null,
-          credits: package_id ? item.credits_amount : item.monthly_credits,
+          credits,
           item_name: item.name,
-        },
-      })
-      .select()
-      .single();
+        }),
+      ]
+    );
 
-    if (paymentError) {
-      throw paymentError;
-    }
+    const payment = result.rows[0];
 
     // In production, create Revolut order here
-    // For now, return the payment record
     const siteUrl = process.env.SITE_URL || 'http://localhost:3000';
-    
+
     return NextResponse.json({
       payment_id: payment.id,
       amount: payment.amount_pence,
       currency: payment.currency,
-      // In production, this would be the Revolut checkout URL
       checkout_url: `${siteUrl}/billing/checkout?payment_id=${payment.id}`,
     });
   } catch (error) {

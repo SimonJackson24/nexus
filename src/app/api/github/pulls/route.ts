@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
 import {
   listPRs,
   getPR,
@@ -10,21 +10,12 @@ import {
 
 // GET /api/github/pulls - List pull requests
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService();
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const searchParams = request.nextUrl.searchParams;
     const repo = searchParams.get('repo');
     const state = (searchParams.get('state') || 'open') as 'open' | 'closed' | 'all';
@@ -37,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     const [owner, repoName] = repo.split('/');
 
-    const prs = await listPRs(user.id, owner, repoName, {
+    const prs = await listPRs(userId!, owner, repoName, {
       state,
       page,
       perPage,
@@ -73,21 +64,12 @@ export async function GET(request: NextRequest) {
 
 // POST /api/github/pulls - Create PR or interact
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService();
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { action, repo, pr_number, title, body: prBody, head, base, draft, comment } = body;
 
@@ -99,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     // Create a new PR
     if (action === 'create' && title && head && base) {
-      const pr = await createPR(user.id, owner, repoName, {
+      const pr = await createPR(userId!, owner, repoName, {
         title,
         body: prBody,
         head,
@@ -124,7 +106,7 @@ export async function POST(request: NextRequest) {
 
     // Get single PR
     if (pr_number) {
-      const pr = await getPR(user.id, owner, repoName, pr_number);
+      const pr = await getPR(userId!, owner, repoName, pr_number);
 
       if (!pr) {
         return NextResponse.json({ error: 'PR not found' }, { status: 404 });
@@ -155,7 +137,7 @@ export async function POST(request: NextRequest) {
 
     // List PR review comments
     if (action === 'list_comments' && pr_number) {
-      const comments = await listPRReviewComments(user.id, owner, repoName, pr_number);
+      const comments = await listPRReviewComments(userId!, owner, repoName, pr_number);
 
       return NextResponse.json({
         pr_number,
@@ -181,7 +163,7 @@ export async function POST(request: NextRequest) {
       }
 
       const newComment = await createPRReviewComment(
-        user.id,
+        userId!,
         owner,
         repoName,
         pr_number,

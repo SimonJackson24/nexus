@@ -1,17 +1,17 @@
 // POST /api/github/repos/create - Create a new repository with initial files
 import { NextRequest, NextResponse } from 'next/server';
-import { createRepository, commitInitialFiles, initNewProject } from '@/lib/github/create-repo';
-import { createClient } from '@/lib/supabase/server';
+import { createRepository, commitInitialFiles } from '@/lib/github/create-repo';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
+import { getGitHubAccessToken } from '@/lib/github/api-service';
 
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { name, description, isPrivate, files } = body;
 
@@ -32,49 +32,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If files are provided, initialize project with files
-    if (files && Array.isArray(files) && files.length > 0) {
-      const result = await initNewProject(user.id, {
-        name,
-        description,
-        isPrivate: isPrivate ?? true,
-        autoInit: false,
-      }, files);
+    // First create the repository
+    const repoResult = await createRepository(userId!, name, description || '', isPrivate ?? true, false);
 
-      if (!result.success) {
+    if (!repoResult.success || !repoResult.repo) {
+      return NextResponse.json(
+        { error: repoResult.error || 'Failed to create repository' },
+        { status: 500 }
+      );
+    }
+
+    // If files are provided, commit them
+    if (files && Array.isArray(files) && files.length > 0) {
+      const [owner, repoName] = repoResult.repo.full_name.split('/');
+      
+      const commitResult = await commitInitialFiles(userId!, owner, repoName, files);
+
+      if (!commitResult.success) {
         return NextResponse.json(
-          { error: result.error || 'Failed to create project' },
+          { error: commitResult.error || 'Failed to commit files' },
           { status: 500 }
         );
       }
 
       return NextResponse.json({
         success: true,
-        repo: result.repo,
-        files_committed: result.files_committed,
-        message: `Created repository "${result.repo?.full_name}" with ${result.files_committed} files`,
+        repo: repoResult.repo,
+        files_committed: files.length,
+        message: `Created repository "${repoResult.repo.full_name}" with ${files.length} files`,
       });
-    }
-
-    // Just create empty repository
-    const repo = await createRepository(user.id, {
-      name,
-      description,
-      isPrivate: isPrivate ?? true,
-      autoInit: false,
-    });
-
-    if (!repo) {
-      return NextResponse.json(
-        { error: 'Failed to create repository' },
-        { status: 500 }
-      );
     }
 
     return NextResponse.json({
       success: true,
-      repo,
-      message: `Created repository "${repo.full_name}"`,
+      repo: repoResult.repo,
+      message: `Created repository "${repoResult.repo.full_name}"`,
     });
   } catch (error) {
     console.error('Create repo API error:', error);

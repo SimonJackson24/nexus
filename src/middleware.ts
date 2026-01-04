@@ -1,25 +1,24 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 
 export function middleware(request: NextRequest) {
-  // Skip for API routes and static files
+  // Skip for API routes, static files, and install page
   if (
     request.nextUrl.pathname.startsWith('/api/') ||
     request.nextUrl.pathname.startsWith('/_next/') ||
     request.nextUrl.pathname.startsWith('/static/') ||
-    request.nextUrl.pathname === '/install'
+    request.nextUrl.pathname === '/install' ||
+    request.nextUrl.pathname === '/auth/'
   ) {
     return NextResponse.next();
   }
 
-  // Check if config exists
-  const configPath = path.join(process.cwd(), '.env.nexus');
-  const configExists = fs.existsSync(configPath);
+  // Check for config using environment variables
+  // In production, NEXUS_SECRET_KEY and DATABASE_HOST must be set
+  const nexusConfigured = process.env.NEXUS_SECRET_KEY || process.env.DATABASE_HOST;
 
-  // Redirect to install if config doesn't exist
-  if (!configExists) {
+  // Redirect to install if not configured
+  if (!nexusConfigured) {
     return NextResponse.redirect(new URL('/install', request.url));
   }
 
@@ -28,13 +27,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|auth/|install).*)',
   ],
 };

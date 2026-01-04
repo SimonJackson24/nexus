@@ -1,15 +1,18 @@
 #!/bin/bash
 #
 # Nexus Automated Deployment Script
-# Fully automated deployment with secure credential generation
+# Deploys Docker image with pre-configured .env.nexus
 #
 # Usage:
-#   ./deploy.sh                    # Default Docker deployment
-#   ./deploy.sh cloudpanel         # CloudPanel/Node.js deployment
-#   ./deploy.sh docker openai      # Docker with specific AI providers
-#   ./deploy.sh docker none        # Docker without AI providers
+#   ./deploy.sh                    # Default deployment
+#   ./deploy.sh docker             # Docker deployment
+#   ./deploy.sh docker init        # Docker with database initialization
+#   ./deploy.sh docker init-admin  # Docker with init + admin creation
 #
-# AI Providers: openai, anthropic, minimax (comma-separated)
+# Prerequisites:
+#   1. Copy .env.nexus.example to .env.nexus and   2. edit values
+# Ensure .env.nexus is in the same directory as this script
+#   3. Or set NEXUS_CONFIG_PATH to point to your config file
 #
 
 set -e
@@ -24,13 +27,14 @@ RESET='\033[0m'
 
 # Default settings
 MODE="${1:-docker}"
-AI_KEYS="${2:-openai,anthropic,minimax}"
-DB_PASSWORD="${DB_PASSWORD:-}"
-JWT_SECRET="${JWT_SECRET:-}"
+ACTION="${2:-deploy}"
 
 # Project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Config file path (default: .env.nexus in script directory)
+NEXUS_CONFIG_PATH="${NEXUS_CONFIG_PATH:-$SCRIPT_DIR/.env.nexus}"
 
 print_header() {
     echo ""
@@ -61,23 +65,6 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${RESET}"
 }
 
-# Generate secure random string
-generate_password() {
-    local length="${1:-24}"
-    tr -dc 'A-Za-z0-9!@#$%^&*()_+-=[]{}|;:,.<>?' < /dev/urandom | head -c "$length"
-}
-
-# Generate UUID
-generate_uuid() {
-    cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())"
-}
-
-# Generate random hex
-generate_hex() {
-    local length="${1:-32}"
-    python3 -c "import os; print(os.urandom($length).hex())" 2>/dev/null || openssl rand -hex "$length"
-}
-
 # Main deployment
 print_header "Nexus Automated Deployment"
 
@@ -93,395 +80,237 @@ else
     exit 1
 fi
 
-# Check Docker Compose
-if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    COMPOSE_VERSION=$(docker compose version 2>/dev/null || echo "v2")
-    print_success "Docker Compose: $COMPOSE_VERSION"
+# Check for existing container
+print_section "Checking Existing Deployment"
+
+if docker ps -a --format '{{.Names}}' | grep -q '^nexus-app$'; then
+    EXISTING_CONTAINER=true
+    print_info "Existing Nexus container found"
+    
+    # Check if running
+    if docker ps --format '{{.Names}}' | grep -q '^nexus-app$'; then
+        print_info "Stopping existing container..."
+        docker stop nexus-app > /dev/null 2>&1 || true
+        print_success "Container stopped"
+    fi
 else
-    print_error "Docker Compose is not available"
+    EXISTING_CONTAINER=false
+    print_info "No existing deployment found"
+fi
+
+# Pull latest image
+print_section "Pulling Latest Image"
+
+if [ -n "$GHCR_TOKEN" ] && [ -n "$USERNAME" ]; then
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$USERNAME" --password-stdin 2>/dev/null || true
+fi
+
+REGISTRY="${GHCR_REGISTRY:-ghcr.io/${USERNAME,,}}"
+IMAGE_NAME="nexus"
+IMAGE_REF="$REGISTRY/$IMAGE_NAME:latest"
+
+print_info "Pulling $IMAGE_REF..."
+if docker pull "$IMAGE_REF" 2>&1 | tail -3; then
+    print_success "Image pulled successfully"
+else
+    print_error "Failed to pull image"
     exit 1
 fi
 
-# Check Node.js for cloudpanel mode
-if [ "$MODE" = "cloudpanel" ]; then
-    if command -v node &> /dev/null; then
-        NODE_VERSION=$(node --version)
-        print_success "Node.js: $NODE_VERSION"
+# Run database initialization if requested
+if [ "$ACTION" = "init" ] || [ "$ACTION" = "init-admin" ]; then
+    print_section "Initializing Database"
+    
+    # Source the config file to get DATABASE_HOST and DATABASE_PASSWORD
+    if [ -f "$NEXUS_CONFIG_PATH" ]; then
+        set -a
+        source "$NEXUS_CONFIG_PATH"
+        set +a
+    fi
+    
+    # Check PostgreSQL connection
+    if [ -n "$DATABASE_HOST" ] && [ -n "$DATABASE_PASSWORD" ]; then
+        print_info "Connecting to PostgreSQL at $DATABASE_HOST..."
+        
+        MAX_ATTEMPTS=30
+        ATTEMPT=0
+        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            if PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" -c "SELECT 1" > /dev/null 2>&1; then
+                break
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            print_info "  Attempt $ATTEMPT/$MAX_ATTEMPTS..."
+            sleep 2
+        done
+        
+        if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            print_error "Failed to connect to PostgreSQL"
+            exit 1
+        fi
+        print_success "PostgreSQL is ready"
+        
+        # Run schema initialization
+        SCHEMA_DIR="$PROJECT_ROOT/nexus/supabase"
+        
+        for schema in schema-hybrid.sql schema-github.sql schema-github-extended.sql; do
+            if [ -f "$SCHEMA_DIR/$schema" ]; then
+                print_info "Running $schema..."
+                if PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" -f "$SCHEMA_DIR/$schema" 2>&1 | tail -3; then
+                    print_success "$schema completed"
+                else
+                    print_warning "$schema may already exist or had issues"
+                fi
+            fi
+        done
+        
+        # Run admin seed functions
+        if [ -f "$SCHEMA_DIR/seed-admin.sql" ]; then
+            print_info "Running seed functions..."
+            PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" -f "$SCHEMA_DIR/seed-admin.sql" 2>&1 | tail -3 || true
+        fi
     else
-        print_error "Node.js is not installed"
-        exit 1
+        print_warning "DATABASE_HOST or DATABASE_PASSWORD not set - skipping database initialization"
+        print_info "Run database initialization manually or use install wizard at /install"
     fi
 fi
 
-# Generate secure credentials
-print_section "Generating Secure Credentials"
-
-declare -A SECRETS
-
-# Database password
-if [ -z "$DB_PASSWORD" ]; then
-    DB_PASSWORD=$(generate_password 24)
-fi
-SECRETS["POSTGRES_PASSWORD"]="$DB_PASSWORD"
-print_success "Generated PostgreSQL password"
-
-# JWT Secret
-if [ -z "$JWT_SECRET" ]; then
-    JWT_SECRET=$(generate_password 48)
-fi
-SECRETS["JWT_SECRET"]="$JWT_SECRET"
-print_success "Generated JWT secret"
-
-# Operator token
-SECRETS["OPERATOR_TOKEN"]=$(generate_uuid)
-print_success "Generated operator token"
-
-# Nexus secret key
-SECRETS["NEXUS_SECRET_KEY"]=$(generate_password 32)
-print_success "Generated Nexus secret key"
-
-# API Key encryption key (for BYOK)
-SECRETS["API_KEY_ENCRYPTION_KEY"]=$(generate_hex 32)
-print_success "Generated API key encryption key"
-
-# Supabase keys
-SECRETS["NEXT_PUBLIC_SUPABASE_ANON_KEY"]="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.$(generate_hex 32)"
-print_success "Generated Supabase anon key"
-
-SECRETS["SUPABASE_SERVICE_ROLE_KEY"]="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.$(generate_hex 32)"
-print_success "Generated Supabase service role key"
-
-# AI Provider keys
-AI_PROVIDERS=()
-IFS=',' read -ra PROVIDERS <<< "$AI_KEYS"
-for provider in "${PROVIDERS[@]}"; do
-    provider=$(echo "$provider" | xargs)
-    case "${provider,,}" in
-        openai)
-            SECRETS["OPENAI_API_KEY"]="sk-xxxxx-xxxxx-xxxxx-xxxxx"
-            SECRETS["OPENAI_MODEL"]="gpt-4-turbo-preview"
-            AI_PROVIDERS+=("OpenAI")
-            print_success "Configured OpenAI"
-            ;;
-        anthropic)
-            SECRETS["ANTHROPIC_API_KEY"]="sk-ant-xxxxx-xxxxx-xxxxx-xxxxx"
-            SECRETS["ANTHROPIC_MODEL"]="claude-sonnet-4-20250514"
-            AI_PROVIDERS+=("Anthropic")
-            print_success "Configured Anthropic"
-            ;;
-        minimax)
-            SECRETS["MINIMAX_API_KEY"]="xxxxx-xxxxx-xxxxx"
-            SECRETS["MINIMAX_MODEL"]="abab6.5s-chat"
-            AI_PROVIDERS+=("MiniMax")
-            print_success "Configured MiniMax"
-            ;;
-    esac
-done
-
-if [ ${#AI_PROVIDERS[@]} -eq 0 ]; then
-    print_info "No AI providers configured (demo mode only)"
-fi
-
-# Create .env file
-print_section "Configuring Environment"
-
-ENV_FILE="$PROJECT_ROOT/nexus/.env"
-ENV_CONTENT="# ============================================
-# Nexus - Auto-Generated Environment Variables
-# Generated: $(date '+%Y-%m-%d %H:%M:%S')
-# ============================================
-
-# ========================================
-# Database Configuration
-# ========================================
-POSTGRES_PASSWORD=${SECRETS[POSTGRES_PASSWORD]}
-
-# ========================================
-# Supabase Configuration
-# ========================================
-NEXT_PUBLIC_SUPABASE_ANON_KEY=${SECRETS[NEXT_PUBLIC_SUPABASE_ANON_KEY]}
-SUPABASE_SERVICE_ROLE_KEY=${SECRETS[SUPABASE_SERVICE_ROLE_KEY]}
-
-# ========================================
-# Application Settings
-# ========================================
-SITE_URL=http://localhost:3000
-NEXUS_SECRET_KEY=${SECRETS[NEXUS_SECRET_KEY]}
-
-# ========================================
-# JWT Configuration
-# ========================================
-JWT_SECRET=${SECRETS[JWT_SECRET]}
-JWT_EXP=3600
-REFRESH_TOKEN_REUSE_INTERVAL=10
-OPERATOR_TOKEN=${SECRETS[OPERATOR_TOKEN]}
-
-# ========================================
-# Email Configuration (Optional)
-# ========================================
-ENABLE_EMAIL_SIGNUP=true
-ENABLE_EMAIL_AUTOCONFIRM=false
-
-# ========================================
-# AI Provider API Keys
-# ========================================
-"
-
-for provider in "${PROVIDERS[@]}"; do
-    provider=$(echo "$provider" | xargs)
-    case "${provider,,}" in
-        openai)
-            ENV_CONTENT+="OPENAI_API_KEY=${SECRETS[OPENAI_API_KEY]}
-OPENAI_MODEL=gpt-4-turbo-preview
-"
-            ;;
-        anthropic)
-            ENV_CONTENT+="ANTHROPIC_API_KEY=${SECRETS[ANTHROPIC_API_KEY]}
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-"
-            ;;
-        minimax)
-            ENV_CONTENT+="MINIMAX_API_KEY=${SECRETS[MINIMAX_API_KEY]}
-MINIMAX_MODEL=abab6.5s-chat
-"
-            ;;
-    esac
-done
-
-ENV_CONTENT+="
-# ========================================
-# BYOK Encryption Key
-# ========================================
-API_KEY_ENCRYPTION_KEY=${SECRETS[API_KEY_ENCRYPTION_KEY]}
-
-# ========================================
-# Development Settings
-# ========================================
-NODE_ENV=production
-NEXT_PUBLIC_APP_NAME=Nexus
-"
-
-echo "$ENV_CONTENT" > "$ENV_FILE"
-print_success "Created .env file at: $ENV_FILE"
-
-# Build application
-print_section "Building Application"
-
-if [ "$MODE" = "docker" ]; then
-    print_info "Building Docker image..."
-    if docker build -t nexus:latest "$PROJECT_ROOT/nexus" 2>&1 | tail -5; then
-        print_success "Docker image built successfully"
+# Create admin user if requested
+if [ "$ACTION" = "init-admin" ]; then
+    print_section "Creating Admin User"
+    
+    if [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ]; then
+        print_info "Creating admin user: $ADMIN_EMAIL"
+        
+        # Create user via API
+        curl -s -X POST "http://localhost:3000/api/install/create-admin" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" > /dev/null 2>&1 || true
+        
+        print_success "Admin user creation initiated"
     else
-        print_error "Docker build failed"
-        exit 1
+        print_warning "ADMIN_EMAIL or ADMIN_PASSWORD not set - skipping admin creation"
     fi
+fi
+
+# Start container
+print_section "Starting Nexus"
+
+# Check for config file
+if [ -f "$NEXUS_CONFIG_PATH" ]; then
+    print_success "Using config: $NEXUS_CONFIG_PATH"
+    CONFIG_VOLUME="$NEXUS_CONFIG_PATH:/app/.env.nexus:ro"
 else
-    print_info "Installing npm dependencies..."
-    cd "$PROJECT_ROOT/nexus"
-    if npm ci 2>&1 | tail -3; then
-        print_success "Dependencies installed"
-    else
-        print_error "Failed to install dependencies"
-        exit 1
-    fi
-
-    print_info "Building Next.js application..."
-    if npm run build 2>&1 | tail -5; then
-        print_success "Application built successfully"
-    else
-        print_error "Build failed"
-        exit 1
-    fi
-    cd "$SCRIPT_DIR"
+    print_warning "Config file not found: $NEXUS_CONFIG_PATH"
+    print_info "Create this file from .env.nexus.example or set NEXUS_CONFIG_PATH"
+    CONFIG_VOLUME=""
 fi
 
-# Start services (Docker mode)
-if [ "$MODE" = "docker" ]; then
-    print_section "Starting Docker Services"
-
-    # Create docker-compose override
-    OVERRIDE_FILE="$PROJECT_ROOT/nexus/docker-compose.override.yml"
-    cat > "$OVERRIDE_FILE" << EOF
+# Create docker-compose override
+OVERRIDE_FILE="$PROJECT_ROOT/nexus/docker-compose.override.yml"
+cat > "$OVERRIDE_FILE" << EOF
 version: '3.8'
 services:
-  postgres:
+  nexus:
+    image: $IMAGE_REF
+    container_name: nexus-app
+    ports:
+      - "3000:3000"
     environment:
-      POSTGRES_PASSWORD: ${SECRETS[POSTGRES_PASSWORD]}
+      - NODE_ENV=production
+      - NEXUS_CONFIG_PATH=/app/.env.nexus
+    volumes:
+      - nexus-data:/app/.next
+      - nexus-uploads:/app/public/uploads
+      ${CONFIG_VOLUME}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  nexus-data:
+  nexus-uploads:
 EOF
 
-    print_info "Starting containers..."
-    export POSTGRES_PASSWORD
-    if docker compose -f "$PROJECT_ROOT/nexus/docker-compose.yml" up -d 2>&1 | tail -10; then
-        print_success "Containers started"
-    else
-        print_error "Failed to start containers"
-        exit 1
-    fi
-
-    # Wait for services to be healthy
-    print_section "Waiting for Services"
-
-    print_info "Waiting for PostgreSQL..."
-    MAX_ATTEMPTS=30
-    ATTEMPT=0
-    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-        if docker exec nexus-postgres pg_isready -U postgres > /dev/null 2>&1; then
-            break
-        fi
-        ATTEMPT=$((ATTEMPT + 1))
-        print_info "  Attempt $ATTEMPT/$MAX_ATTEMPTS..."
-        sleep 2
-    done
-
-    if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-        print_error "PostgreSQL failed to start"
-        exit 1
-    fi
-    print_success "PostgreSQL is ready"
-
-    # Initialize database schema
-    print_section "Initializing Database"
-
-    print_info "Running database schema..."
-    SCHEMA_DIR="$PROJECT_ROOT/nexus/supabase"
-
-    # Run schema files in order
-    if [ -f "$SCHEMA_DIR/schema-hybrid.sql" ]; then
-      print_info "Running schema-hybrid.sql..."
-      if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_DIR/schema-hybrid.sql" 2>&1 | tail -10; then
-        print_success "Database schema initialized"
-      else
-        print_warning "Schema may already exist"
-      fi
-    fi
-
-    # Run GitHub integration schema
-    if [ -f "$SCHEMA_DIR/schema-github.sql" ]; then
-      print_info "Running schema-github.sql..."
-      if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_DIR/schema-github.sql" 2>&1 | tail -5; then
-        print_success "GitHub schema initialized"
-      else
-        print_warning "GitHub schema may already exist"
-      fi
-    fi
-
-    # Run GitHub extended schema
-    if [ -f "$SCHEMA_DIR/schema-github-extended.sql" ]; then
-      print_info "Running schema-github-extended.sql..."
-      if docker exec -i nexus-postgres psql -U postgres -d postgres < "$SCHEMA_DIR/schema-github-extended.sql" 2>&1 | tail -5; then
-        print_success "GitHub extended schema initialized"
-      else
-        print_warning "GitHub extended schema may already exist"
-      fi
-    fi
-
-    # Run seed functions
-    SEED_FILE="$SCHEMA_DIR/seed-admin.sql"
-    if [ -f "$SEED_FILE" ]; then
-      print_info "Running admin seed functions..."
-      docker exec -i nexus-postgres psql -U postgres -d postgres < "$SEED_FILE" 2>&1 | tail -5 || true
-    fi
-
-    # Create default admin user if not exists
-    print_section "Creating Admin User"
-
-    ADMIN_EMAIL="${ADMIN_EMAIL:-admin@nexus.local}"
-    ADMIN_PASSWORD=$(generate_password 16)
-
-    # Check if admin user already exists
-    EXISTING_ADMIN=$(docker exec nexus-postgres psql -U postgres -d postgres -t -c "SELECT email FROM auth.users WHERE email = '$ADMIN_EMAIL';" 2>/dev/null || echo "")
-
-    if [ -z "$EXISTING_ADMIN" ]; then
-      print_info "Creating default admin user: $ADMIN_EMAIL"
-
-      # Generate admin user via API call
-      KONG_URL="${KONG_URL:-http://localhost:8000}"
-      SERVICE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}"
-
-      if [ -n "$SERVICE_KEY" ]; then
-        # Try to create admin via Supabase Auth Admin API
-        curl -s -X POST "$KONG_URL/auth/v1/admin/users" \
-          -H "Authorization: Bearer $SERVICE_KEY" \
-          -H "Content-Type: application/json" \
-          -d "{\"email\": \"$ADMIN_EMAIL\", \"password\": \"$ADMIN_PASSWORD\", \"email_confirm\": true, \"user_metadata\": {\"is_admin\": true, \"force_password_change\": true}}" > /dev/null 2>&1 || true
-
-        print_success "Admin user created!"
-        print_warning "IMPORTANT: Save these credentials!"
-        echo ""
-        echo -e "${BOLD}Admin Login Credentials:${RESET}"
-        echo -e "  Email: ${GREEN}$ADMIN_EMAIL${RESET}"
-        echo -e "  Password: ${GREEN}$ADMIN_PASSWORD${RESET}"
-        echo ""
-        echo -e "${YELLOW}You MUST change the password on first login!${RESET}"
-      else
-        print_warning "SERVICE_KEY not set - skipping admin creation"
-        print_info "Run scripts/create-admin.sh manually after deployment"
-      fi
-    else
-      print_success "Admin user already exists"
-    fi
+print_info "Starting container..."
+if docker compose -f "$PROJECT_ROOT/nexus/docker-compose.yml" up -d 2>&1 | tail -5; then
+    print_success "Container started"
+else
+    print_error "Failed to start container"
+    exit 1
 fi
 
-# Output credentials
+# Wait for container to be healthy
+print_section "Verifying Deployment"
+
+MAX_ATTEMPTS=30
+ATTEMPT=0
+while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+    if docker ps --format '{{.Names}}' | grep -q '^nexus-app$' && \
+       docker inspect --format='{{.State.Health.Status}}' nexus-app 2>/dev/null | grep -q 'healthy'; then
+        break
+    fi
+    ATTEMPT=$((ATTEMPT + 1))
+    print_info "  Attempt $ATTEMPT/$MAX_ATTEMPTS..."
+    sleep 2
+done
+
+if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+    print_warning "Container may not be fully healthy - checking status..."
+    docker ps
+else
+    print_success "Container is healthy"
+fi
+
+# Output deployment info
 print_header "Deployment Complete!"
 
 echo ""
 echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}${GREEN}║                    DEPLOYMENT CREDENTIALS                   ║${RESET}"
+echo -e "${BOLD}${GREEN}║                    DEPLOYMENT SUCCESS                       ║${RESET}"
 echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════════╝${RESET}"
-echo ""
-
-echo -e "${BOLD}PostgreSQL:${RESET}"
-echo "  Host: localhost"
-echo "  Port: 5432"
-echo "  User: postgres"
-echo -e "  Password: ${GREEN}${SECRETS[POSTGRES_PASSWORD]}${RESET}"
-echo "  Database: postgres"
-echo ""
-
-echo -e "${BOLD}Supabase Studio (Database UI):${RESET}"
-echo -e "  URL: ${BLUE}http://localhost:54321${RESET}"
 echo ""
 
 echo -e "${BOLD}Nexus Application:${RESET}"
 echo -e "  URL: ${BLUE}http://localhost:3000${RESET}"
 echo ""
 
-echo -e "${BOLD}API Gateway (Kong):${RESET}"
-echo "  Admin: http://localhost:8001"
-echo "  Proxy: http://localhost:8000"
-echo ""
-
-echo -e "${BOLD}Security Credentials (Save These!):${RESET}"
-echo -e "  JWT Secret: ${GREEN}${SECRETS[JWT_SECRET]}${RESET}"
-echo -e "  Nexus Secret: ${GREEN}${SECRETS[NEXUS_SECRET_KEY]}${RESET}"
-echo -e "  API Key Encryption: ${GREEN}${SECRETS[API_KEY_ENCRYPTION_KEY]}${RESET}"
-echo -e "  Operator Token: ${GREEN}${SECRETS[OPERATOR_TOKEN]}${RESET}"
-echo ""
-
-echo -e "${BOLD}Supabase Keys:${RESET}"
-echo -e "  Anon Key: ${GREEN}${SECRETS[NEXT_PUBLIC_SUPABASE_ANON_KEY]}${RESET}"
-echo -e "  Service Role: ${GREEN}${SECRETS[SUPABASE_SERVICE_ROLE_KEY]}${RESET}"
-echo ""
-
-if [ ${#AI_PROVIDERS[@]} -gt 0 ]; then
-    echo -e "${BOLD}AI Provider API Keys (Add to .env):${RESET}"
-    for provider in "${AI_PROVIDERS[@]}"; do
-        KEY_NAME="${provider^^}_API_KEY"
-        echo -e "  $provider: ${GREEN}${SECRETS[$KEY_NAME]}${RESET}"
-    done
+if [ -f "$NEXUS_CONFIG_PATH" ]; then
+    echo -e "${BOLD}Configuration:${RESET}"
+    echo -e "  File: ${GREEN}$NEXUS_CONFIG_PATH${RESET}"
+    echo ""
+else
+    echo -e "${BOLD}Configuration Required:${RESET}"
+    echo -e "  Copy ${YELLOW}.env.nexus.example${RESET} to ${YELLOW}.env.nexus${RESET} and edit"
+    echo -e "  Then restart the container"
     echo ""
 fi
 
-echo -e "${BOLD}Configuration File:${RESET}"
-echo -e "  ${GREEN}$ENV_FILE${RESET}"
+echo -e "${BOLD}Installation Wizard:${RESET}"
+if [ "$ACTION" = "init" ] || [ "$ACTION" = "init-admin" ]; then
+    echo -e "  Database: ${GREEN}Initialized${RESET}"
+else
+    echo -e "  URL: ${BLUE}http://localhost:3000/install${RESET}"
+    echo "  Complete setup to configure database and create admin user"
+fi
+
+if [ "$ACTION" = "init-admin" ] && [ -n "$ADMIN_EMAIL" ]; then
+    echo ""
+    echo -e "${BOLD}Admin User:${RESET}"
+    echo -e "  Email: ${GREEN}$ADMIN_EMAIL${RESET}"
+    if [ -n "$ADMIN_PASSWORD" ]; then
+        echo -e "  Password: ${GREEN}$ADMIN_PASSWORD${RESET}"
+    fi
+    echo -e "${YELLOW}Change password on first login!${RESET}"
+fi
+
+echo ""
+echo -e "${YELLOW}Next Steps:${RESET}"
+echo "  1. Visit http://localhost:3000"
+echo "  2. If not pre-configured, complete the installation wizard"
+echo "  3. Configure AI provider API keys in settings"
 echo ""
 
-echo -e "${YELLOW}IMPORTANT:${RESET}"
-echo "  1. ${BOLD}Save this information securely${RESET} - passwords are not stored"
-echo "  2. ${BOLD}Replace placeholder API keys${RESET} with real keys in .env"
-echo "  3. ${BOLD}Change all secrets${RESET} before production deployment"
-echo ""
-
-echo -e "${GREEN}Deployment successful!${RESET}"
-echo ""
+print_success "Deployment successful!"

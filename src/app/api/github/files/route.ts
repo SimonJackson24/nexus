@@ -1,36 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
 import { getGitHubAccessToken, getRepoTree, getFileContent, searchCode } from '@/lib/github/api-service';
 import { isCodeFile } from '@/lib/github/types';
+import { query } from '@/lib/db';
 
 // GET /api/github/files - List files in a repo or search code
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const searchParams = request.nextUrl.searchParams;
     const repo = searchParams.get('repo'); // full_name (owner/repo)
     const path = searchParams.get('path');
-    const query = searchParams.get('q'); // Search query
+    const queryText = searchParams.get('q'); // Search query
     const branch = searchParams.get('branch') || 'main';
 
     if (!repo) {
       return NextResponse.json({ error: 'Repository is required' }, { status: 400 });
     }
 
-    const accessToken = await getGitHubAccessToken(user.id);
+    const accessToken = await getGitHubAccessToken(userId!);
     if (!accessToken) {
       return NextResponse.json({ error: 'GitHub not connected' }, { status: 402 });
     }
@@ -38,49 +30,38 @@ export async function GET(request: NextRequest) {
     const [owner, repoName] = repo.split('/');
 
     // Search code if query provided
-    if (query) {
-      const results = await searchCode(accessToken, query, {
-        repo: repo,
-        perPage: 20,
-      });
-
-      // Record search history
-      await supabase.from('github_search_history').insert({
-        user_id: user.id,
-        query,
-        result_count: results.totalCount,
-      });
+    if (queryText) {
+      const results = await searchCode(queryText, owner, repoName, accessToken);
 
       return NextResponse.json({
         type: 'search',
-        query,
-        total_count: results.totalCount,
-        results: results.items.map((item) => ({
+        query: queryText,
+        total_count: results.length,
+        results: results.map((item: any) => ({
           path: item.path,
           sha: item.sha,
           size: item.size,
           html_url: item.html_url,
           repository: {
-            name: item.repository.name,
-            full_name: item.repository.full_name,
+            name: item.repository?.name,
+            full_name: item.repository?.full_name,
           },
         })),
       });
     }
 
     // Get file tree
-    const tree = await getRepoTree(accessToken, owner, repoName, branch, true);
+    const tree = await getRepoTree(owner, repoName, accessToken);
 
     // Filter to code files if path not specified
     const filteredTree = path
-      ? tree.filter((item) => item.path.startsWith(path))
-      : tree.filter((item) => isCodeFile(item.path) || item.type === 'tree');
+      ? tree?.filter((item: any) => item.path.startsWith(path))
+      : tree?.filter((item: any) => isCodeFile(item.path) || item.type === 'tree');
 
     // Build directory structure
-    if (!path) {
+    if (!path && filteredTree) {
       // Return root structure
       const rootItems: { path: string; type: 'file' | 'dir'; size?: number }[] = [];
-      const processedPaths = new Set<string>();
 
       // First pass: collect direct children of root
       for (const item of filteredTree) {
@@ -91,7 +72,6 @@ export async function GET(request: NextRequest) {
             type: item.type as 'file' | 'dir',
             size: item.size,
           });
-          processedPaths.add(item.path);
         }
       }
 
@@ -104,30 +84,38 @@ export async function GET(request: NextRequest) {
     }
 
     // Return specific path contents
-    const pathItems: { path: string; type: 'file' | 'dir'; size?: number }[] = [];
-    const processedPaths = new Set<string>();
+    if (filteredTree) {
+      const pathItems: { path: string; type: 'file' | 'dir'; size?: number }[] = [];
 
-    for (const item of filteredTree) {
-      if (!item.path.startsWith(path)) continue;
+      for (const item of filteredTree) {
+        if (!item.path.startsWith(path!)) continue;
 
-      const relativePath = item.path.slice(path.length + 1);
-      const parts = relativePath.split('/');
+        const relativePath = item.path.slice(path!.length + 1);
+        const parts = relativePath.split('/');
 
-      if (parts.length === 1) {
-        pathItems.push({
-          path: item.path,
-          type: item.type as 'file' | 'dir',
-          size: item.size,
-        });
+        if (parts.length === 1) {
+          pathItems.push({
+            path: item.path,
+            type: item.type as 'file' | 'dir',
+            size: item.size,
+          });
+        }
       }
+
+      return NextResponse.json({
+        type: 'tree',
+        repo,
+        path,
+        branch,
+        items: pathItems,
+      });
     }
 
     return NextResponse.json({
       type: 'tree',
       repo,
-      path,
       branch,
-      items: pathItems,
+      items: [],
     });
   } catch (error) {
     console.error('GitHub files error:', error);
@@ -137,21 +125,12 @@ export async function GET(request: NextRequest) {
 
 // POST /api/github/files/content - Get file content
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { repo, path, branch = 'main' } = body;
 
@@ -159,35 +138,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Repository and path are required' }, { status: 400 });
     }
 
-    const accessToken = await getGitHubAccessToken(user.id);
+    const accessToken = await getGitHubAccessToken(userId!);
     if (!accessToken) {
       return NextResponse.json({ error: 'GitHub not connected' }, { status: 402 });
     }
 
     const [owner, repoName] = repo.split('/');
 
-    // Get tree to find file SHA
-    const tree = await getRepoTree(accessToken, owner, repoName, branch, false);
-    const fileItem = tree.find((item) => item.path === path);
+    // Get file content directly
+    const contentResult = await getFileContent(owner, repoName, path, accessToken);
 
-    if (!fileItem || (fileItem as any).type !== 'blob') {
+    if (!contentResult) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
 
-    // Get file content
-    const content = await getFileContent(accessToken, owner, repoName, path, fileItem.sha);
-
-    if (content === null) {
-      return NextResponse.json({ error: 'Failed to read file' }, { status: 500 });
+    // Decode base64 content if it's a file
+    let decodedContent = null;
+    if (contentResult.type === 'file' && contentResult.content) {
+      decodedContent = Buffer.from(contentResult.content, 'base64').toString('utf-8');
     }
 
     return NextResponse.json({
       repo,
       path,
       branch,
-      content,
-      size: fileItem.size,
-      sha: fileItem.sha,
+      content: decodedContent || contentResult,
+      sha: contentResult.sha,
+      size: contentResult.size,
     });
   } catch (error) {
     console.error('GitHub file content error:', error);

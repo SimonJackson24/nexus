@@ -2,21 +2,7 @@
 // Phase 2: Issues, PRs, Comments
 // Phase 3: Actions, Workflows
 
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from '@/lib/supabase/types';
 import { getGitHubAccessToken } from './api-service';
-
-// Lazy-initialized typed Supabase client
-let supabaseClient: ReturnType<typeof createClient<Database>> | null = null;
-
-function getSupabase(): ReturnType<typeof createClient<Database>> {
-  if (!supabaseClient) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-    supabaseClient = createClient<Database>(supabaseUrl, supabaseServiceKey);
-  }
-  return supabaseClient;
-}
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -89,7 +75,7 @@ export async function listIssues(
       direction,
       per_page: perPage.toString(),
       page: page.toString(),
-      filter: 'all', // Include assigned issues
+      filter: 'all',
     });
 
     if (labels) params.append('labels', labels);
@@ -379,7 +365,7 @@ export async function listIssueComments(
   }
 }
 
-// List comments on a PR (review comments)
+// List comments on a PR
 export async function listPRReviewComments(
   userId: string,
   owner: string,
@@ -510,7 +496,7 @@ export interface GitHubWorkflowRun {
   id: number;
   run_number: number;
   status: 'queued' | 'in_progress' | 'completed';
-  conclusion: string | null; // for completed runs
+  conclusion: string | null;
   head_branch: string;
   event: string;
   actor: { login: string };
@@ -519,11 +505,6 @@ export interface GitHubWorkflowRun {
   run_started_at: string;
   run_completed_at: string | null;
   html_url: string;
-}
-
-export interface WorkflowDispatchParams {
-  ref?: string;
-  inputs?: Record<string, string>;
 }
 
 // List workflows
@@ -699,7 +680,7 @@ export async function rerunWorkflow(
 }
 
 // ============================================
-// Branches API (Phase 4)
+// Branches API
 // ============================================
 
 export interface GitHubBranch {
@@ -762,13 +743,13 @@ export async function getBranch(
 }
 
 // ============================================
-// File Operations (Phase 4)
+// File Operations
 // ============================================
 
 export interface CreateUpdateFileParams {
   message: string;
-  content: string; // Base64 encoded
-  sha?: string; // Required for updates
+  content: string;
+  sha?: string;
   branch?: string;
 }
 

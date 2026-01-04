@@ -8,8 +8,6 @@ import {
   TrendingUp, Lock, Globe, Cpu, Bot, FileText, BarChart,
   Play, Menu, X as XIcon, ExternalLink, Terminal, Search
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
-import { User } from '@supabase/supabase-js';
 
 // Subscription tiers data
 const TIERS = [
@@ -256,7 +254,7 @@ const generateStructuredData = () => ({
 });
 
 export default function Homepage() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string; display_name: string | null; is_admin: boolean } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -265,17 +263,19 @@ export default function Homepage() {
   const [error, setError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [supabase, setSupabase] = useState<ReturnType<typeof createClient> | null>(null);
 
   useEffect(() => {
-    // Create Supabase client on client side only
-    const client = createClient();
-    setSupabase(client);
-
-    // Check auth state
+    // Check auth state on mount
     const checkAuth = async () => {
-      const { data: { user } } = await client.auth.getUser();
-      setUser(user);
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data.user);
+        }
+      } catch (e) {
+        // Not logged in
+      }
     };
     checkAuth();
 
@@ -289,20 +289,26 @@ export default function Homepage() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase) return;
     setLoading(true);
     setError('');
 
     try {
-      if (authMode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        window.location.href = '/app';
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setError('Check your email for the confirmation link!');
+      const endpoint = authMode === 'signin' ? '/api/auth/login' : '/api/auth/register';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Authentication failed');
       }
+
+      setUser(data.user);
+      setShowAuthModal(false);
+      window.location.href = '/app';
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -311,8 +317,7 @@ export default function Homepage() {
   };
 
   const handleSignOut = async () => {
-    if (!supabase) return;
-    await supabase.auth.signOut();
+    await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
   };
 

@@ -1,58 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/auth/middleware';
+import { changePassword } from '@/lib/auth';
 
-// Helper function to create admin client lazily (avoids build-time errors)
-function getSupabaseAdmin() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createClient(supabaseUrl, supabaseServiceKey);
-}
-
-// Helper function to create regular client lazily
-function getSupabase() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createClient(supabaseUrl, supabaseServiceKey);
-}
-
-// POST /api/auth/change-password - Change password (clears force_password_change flag)
+// POST /api/auth/change-password - Change user password
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = getSupabase();
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
-    const { new_password } = body;
+    const { current_password, new_password } = body;
 
-    if (!new_password || new_password.length < 8) {
+    if (!current_password || !new_password) {
       return NextResponse.json(
-        { error: 'Password must be at least 8 characters' },
+        { error: 'Current and new password are required' },
         { status: 400 }
       );
     }
 
-    // Update the password via admin API (needed to clear the flag)
-    const supabaseAdmin = getSupabaseAdmin();
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-      user.id,
-      { password: new_password }
-    );
-
-    if (updateError) {
-      console.error('Error updating password:', updateError);
+    if (new_password.length < 8) {
       return NextResponse.json(
-        { error: 'Failed to update password' },
-        { status: 500 }
+        { error: 'New password must be at least 8 characters' },
+        { status: 400 }
+      );
+    }
+
+    const result = await changePassword(userId!, current_password, new_password);
+
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error || 'Failed to change password' },
+        { status: 400 }
       );
     }
 
@@ -69,33 +49,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET /api/auth/change-password - Check if password change is required
-export async function GET(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const supabase = getSupabase();
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if force_password_change is set
-    const needsChange = user.user_metadata?.force_password_change === true;
-
-    return NextResponse.json({
-      needs_password_change: needsChange,
-    });
-  } catch (error) {
-    console.error('Password check error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
+// GET /api/auth/change-password - Check if password change is required (always false with new auth)
+export async function GET() {
+  return NextResponse.json({
+    needs_password_change: false,
+  });
 }

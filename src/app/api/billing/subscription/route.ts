@@ -1,59 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
 
 // GET /api/billing/subscription - Get user's subscription
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     // Fetch user's subscription with tier details
-    const { data: subscription, error } = await supabase
-      .from('user_subscriptions')
-      .select(`
-        *,
-        tier:subscription_tiers(*)
-      `)
-      .eq('user_id', user.id)
-      .single();
+    const result = await query(
+      `SELECT us.*, st.* 
+       FROM user_subscriptions us
+       LEFT JOIN subscription_tiers st ON us.tier_id = st.id
+       WHERE us.user_id = $1
+       LIMIT 1`,
+      [userId]
+    );
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // No subscription found, return default
-        const { data: defaultTier } = await supabase
-          .from('subscription_tiers')
-          .select('*')
-          .eq('id', 'free')
-          .single();
+    if (result.rows.length === 0) {
+      // No subscription found, return default free tier
+      const defaultTierResult = await query(
+        'SELECT * FROM subscription_tiers WHERE id = $1',
+        ['free']
+      );
 
-        return NextResponse.json({
-          subscription: {
-            user_id: user.id,
-            tier_id: 'free',
-            tier: defaultTier,
-            status: 'active',
-            subscription_mode: 'credits',
-            credits_balance: 0,
-            credits_this_cycle: 0,
-          },
-        });
-      }
-      console.error('Error fetching subscription:', error);
-      return NextResponse.json({ error: 'Failed to fetch subscription' }, { status: 500 });
+      return NextResponse.json({
+        subscription: {
+          user_id: userId,
+          tier_id: 'free',
+          tier: defaultTierResult.rows[0] || null,
+          status: 'active',
+          subscription_mode: 'credits',
+          credits_balance: 0,
+          credits_this_cycle: 0,
+        },
+      });
     }
 
-    return NextResponse.json({ subscription });
+    const subscription = result.rows[0];
+    return NextResponse.json({
+      subscription: {
+        id: subscription.id,
+        user_id: subscription.user_id,
+        tier_id: subscription.tier_id,
+        status: subscription.status,
+        subscription_mode: subscription.subscription_mode,
+        credits_balance: subscription.credits_balance,
+        credits_this_cycle: subscription.credits_this_cycle,
+        current_cycle_start: subscription.current_cycle_start,
+        current_cycle_end: subscription.current_cycle_end,
+        tier: {
+          id: subscription.tier_id,
+          name: subscription.name,
+          price_pence_monthly: subscription.price_pence_monthly,
+          monthly_credits: subscription.monthly_credits,
+          currency: subscription.currency,
+          is_active: subscription.is_active,
+        },
+      },
+    });
   } catch (error) {
     console.error('Subscription GET error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -62,91 +70,85 @@ export async function GET(request: NextRequest) {
 
 // POST /api/billing/subscription - Create or update subscription
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { tier_id, subscription_mode = 'credits' } = body;
 
     // Validate tier exists
-    const { data: tier, error: tierError } = await supabase
-      .from('subscription_tiers')
-      .select('*')
-      .eq('id', tier_id)
-      .eq('is_active', true)
-      .single();
+    const tierResult = await query(
+      'SELECT * FROM subscription_tiers WHERE id = $1 AND is_active = true',
+      [tier_id]
+    );
 
-    if (tierError || !tier) {
+    const tier = tierResult.rows[0];
+
+    if (!tier) {
       return NextResponse.json({ error: 'Invalid tier' }, { status: 400 });
     }
 
     // Check if subscription already exists
-    const { data: existing, error: existingError } = await supabase
-      .from('user_subscriptions')
-      .select('*')
-      .eq('user_id', user.id)
-      .single();
+    const existingResult = await query(
+      'SELECT * FROM user_subscriptions WHERE user_id = $1',
+      [userId]
+    );
 
+    const existing = existingResult.rows[0];
     const now = new Date();
     const cycleEnd = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
 
     if (existing) {
       // Update existing subscription
-      const { data: updated, error: updateError } = await supabase
-        .from('user_subscriptions')
-        .update({
-          tier_id,
-          subscription_mode,
-          status: 'active',
-          current_cycle_end: cycleEnd.toISOString(),
-          updated_at: now.toISOString(),
-        })
-        .eq('id', existing.id)
-        .select('*, tier:subscription_tiers(*)')
-        .single();
+      const updatedResult = await query(
+        `UPDATE user_subscriptions
+         SET tier_id = $1, subscription_mode = $2, status = $3, 
+             current_cycle_end = $4, updated_at = $5
+         WHERE id = $6
+         RETURNING *`,
+        [tier_id, subscription_mode, 'active', cycleEnd.toISOString(), now.toISOString(), existing.id]
+      );
 
-      if (updateError) {
-        console.error('Error updating subscription:', updateError);
-        return NextResponse.json({ error: 'Failed to update subscription' }, { status: 500 });
-      }
+      const updated = updatedResult.rows[0];
 
-      return NextResponse.json({ subscription: updated });
+      return NextResponse.json({
+        subscription: {
+          ...updated,
+          tier,
+        },
+      });
     }
 
     // Create new subscription
-    const { data: newSubscription, error: createError } = await supabase
-      .from('user_subscriptions')
-      .insert({
-        user_id: user.id,
+    const newResult = await query(
+      `INSERT INTO user_subscriptions 
+       (user_id, tier_id, subscription_mode, status, credits_balance, credits_this_cycle, 
+        current_cycle_start, current_cycle_end)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        userId,
         tier_id,
         subscription_mode,
-        status: 'active',
-        credits_balance: tier.monthly_credits,
-        credits_this_cycle: 0,
-        current_cycle_start: now.toISOString(),
-        current_cycle_end: cycleEnd.toISOString(),
-      })
-      .select('*, tier:subscription_tiers(*)')
-      .single();
+        'active',
+        tier.monthly_credits,
+        0,
+        now.toISOString(),
+        cycleEnd.toISOString(),
+      ]
+    );
 
-    if (createError) {
-      console.error('Error creating subscription:', createError);
-      return NextResponse.json({ error: 'Failed to create subscription' }, { status: 500 });
-    }
+    const newSubscription = newResult.rows[0];
 
-    return NextResponse.json({ subscription: newSubscription });
+    return NextResponse.json({
+      subscription: {
+        ...newSubscription,
+        tier,
+      },
+    });
   } catch (error) {
     console.error('Subscription POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -155,21 +157,12 @@ export async function POST(request: NextRequest) {
 
 // PATCH /api/billing/subscription - Update subscription mode (credits/byok)
 export async function PATCH(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { subscription_mode, tier_id } = body;
 
@@ -178,53 +171,71 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Check if subscription exists
-    const { data: existing, error: existingError } = await supabase
-      .from('user_subscriptions')
-      .select('*')
-      .eq('user_id', user.id)
-      .single();
+    const existingResult = await query(
+      'SELECT * FROM user_subscriptions WHERE user_id = $1',
+      [userId]
+    );
 
-    if (existingError || !existing) {
+    const existing = existingResult.rows[0];
+
+    if (!existing) {
       return NextResponse.json({ error: 'No subscription found' }, { status: 404 });
     }
 
-    // Update subscription mode
-    const updateData: Record<string, unknown> = {
-      subscription_mode,
-      updated_at: new Date().toISOString(),
-    };
+    const updateFields: string[] = ['subscription_mode = $1', 'updated_at = $2'];
+    const updateValues: any[] = [subscription_mode, new Date().toISOString()];
+    let paramIndex = 3;
 
     if (tier_id) {
       // Also update tier if provided
-      const { data: tier } = await supabase
-        .from('subscription_tiers')
-        .select('monthly_credits')
-        .eq('id', tier_id)
-        .single();
+      const tierResult = await query(
+        'SELECT monthly_credits FROM subscription_tiers WHERE id = $1',
+        [tier_id]
+      );
+
+      const tier = tierResult.rows[0];
 
       if (tier) {
-        updateData.tier_id = tier_id;
+        updateFields.push(`tier_id = $${paramIndex++}`);
+        updateValues.push(tier_id);
         // Reset credits if switching to credits mode
         if (subscription_mode === 'credits') {
-          updateData.credits_balance = tier.monthly_credits;
-          updateData.credits_this_cycle = 0;
+          updateFields.push(`credits_balance = $${paramIndex++}`);
+          updateValues.push(tier.monthly_credits);
+          updateFields.push(`credits_this_cycle = $${paramIndex}`);
+          updateValues.push(0);
         }
       }
     }
 
-    const { data: updated, error: updateError } = await supabase
-      .from('user_subscriptions')
-      .update(updateData)
-      .eq('id', existing.id)
-      .select('*, tier:subscription_tiers(*)')
-      .single();
+    updateValues.push(existing.id);
 
-    if (updateError) {
-      console.error('Error updating subscription mode:', updateError);
-      return NextResponse.json({ error: 'Failed to update subscription' }, { status: 500 });
-    }
+    await query(
+      `UPDATE user_subscriptions SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+      updateValues
+    );
 
-    return NextResponse.json({ subscription: updated });
+    // Fetch updated with tier
+    const updatedResult = await query(
+      `SELECT us.*, st.* 
+       FROM user_subscriptions us
+       LEFT JOIN subscription_tiers st ON us.tier_id = st.id
+       WHERE us.id = $1`,
+      [existing.id]
+    );
+
+    const updated = updatedResult.rows[0];
+
+    return NextResponse.json({
+      subscription: {
+        ...updated,
+        tier: {
+          id: updated.tier_id,
+          name: updated.name,
+          monthly_credits: updated.monthly_credits,
+        },
+      },
+    });
   } catch (error) {
     console.error('Subscription PATCH error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -233,36 +244,19 @@ export async function PATCH(request: NextRequest) {
 
 // DELETE /api/billing/subscription - Cancel subscription
 export async function DELETE(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     // Cancel subscription - move to free tier
-    const { error: updateError } = await supabase
-      .from('user_subscriptions')
-      .update({
-        tier_id: 'free',
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', user.id);
-
-    if (updateError) {
-      console.error('Error cancelling subscription:', updateError);
-      return NextResponse.json({ error: 'Failed to cancel subscription' }, { status: 500 });
-    }
+    await query(
+      `UPDATE user_subscriptions
+       SET tier_id = 'free', status = 'cancelled', cancelled_at = $1, updated_at = $1
+       WHERE user_id = $2`,
+      [new Date().toISOString(), userId]
+    );
 
     return NextResponse.json({ success: true, message: 'Subscription cancelled' });
   } catch (error) {

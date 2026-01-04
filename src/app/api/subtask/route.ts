@@ -1,231 +1,160 @@
-import { createClient } from '@/lib/supabase/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
 
-// GET /api/subtask - List subtasks
-export async function GET(request: Request) {
+// GET /api/subtask - List user's subtasks
+export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const { searchParams } = new URL(request.url);
-    const task_id = searchParams.get('task_id');
-    const parent_id = searchParams.get('parent_id');
+    const chatId = searchParams.get('chat_id');
+    const status = searchParams.get('status');
 
-    let query = supabase
-      .from('subtasks')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('sort_order', { ascending: true });
+    let text = `SELECT * FROM subtasks WHERE user_id = $1`;
+    const params: any[] = [userId];
+    let paramIndex = 2;
 
-    if (task_id) {
-      query = query.eq('task_id', task_id);
+    if (chatId) {
+      text += ` AND chat_id = $${paramIndex}`;
+      params.push(chatId);
+      paramIndex++;
     }
 
-    if (parent_id) {
-      query = query.eq('parent_id', parent_id);
+    if (status) {
+      text += ` AND status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
     }
 
-    const { data: subtasks, error } = await query;
+    text += ` ORDER BY created_at DESC`;
 
-    if (error) {
-      console.error('Error fetching subtasks:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch subtasks' },
-        { status: 500 }
-      );
-    }
+    const result = await query(text, params);
 
-    return NextResponse.json({ subtasks: subtasks || [] });
+    return NextResponse.json({ subtasks: result.rows || [] });
   } catch (error) {
     console.error('Error fetching subtasks:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch subtasks' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch subtasks' }, { status: 500 });
   }
 }
 
 // POST /api/subtask - Create a new subtask
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const body = await request.json();
-    const { task_id, parent_id, title, description, status, sort_order } = body;
+    const { chat_id, parent_message_id, title, description, priority } = body;
 
-    const { data: subtask, error } = await supabase
-      .from('subtasks')
-      .insert({
-        user_id: user.id,
-        task_id: task_id || null,
-        parent_id: parent_id || null,
-        title,
-        description: description || null,
-        status: status || 'pending',
-        sort_order: sort_order || 0,
-      })
-      .select()
-      .single();
+    const result = await query(
+      `INSERT INTO subtasks (user_id, chat_id, parent_message_id, title, description, priority)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [userId, chat_id, parent_message_id || null, title, description || null, priority || 'medium']
+    );
 
-    if (error) {
-      console.error('Error creating subtask:', error);
-      return NextResponse.json(
-        { error: 'Failed to create subtask' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ subtask });
+    return NextResponse.json({ subtask: result.rows[0] });
   } catch (error) {
     console.error('Error creating subtask:', error);
-    return NextResponse.json(
-      { error: 'Failed to create subtask' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to create subtask' }, { status: 500 });
   }
 }
 
 // PATCH /api/subtask - Update a subtask
-export async function PATCH(request: Request) {
-  try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+export async function PATCH(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
 
+  const userId = request.headers.get('x-user-id');
+
+  try {
     const body = await request.json();
-    const { id, title, description, status, sort_order, completed_at } = body;
+    const { id, status, title, description, priority } = body;
 
     // Verify ownership
-    const { data: existing } = await supabase
-      .from('subtasks')
-      .select('user_id')
-      .eq('id', id)
-      .single();
+    const existing = await query(
+      `SELECT user_id FROM subtasks WHERE id = $1`,
+      [id]
+    );
 
-    if (!existing || existing.user_id !== user.id) {
-      return NextResponse.json(
-        { error: 'Subtask not found or forbidden' },
-        { status: 404 }
-      );
+    if (existing.rows.length === 0 || existing.rows[0].user_id !== userId) {
+      return NextResponse.json({ error: 'Subtask not found or forbidden' }, { status: 404 });
     }
 
-    const { data: subtask, error } = await supabase
-      .from('subtasks')
-      .update({
-        title,
-        description,
-        status,
-        sort_order,
-        completed_at: completed_at || (status === 'completed' ? new Date().toISOString() : null),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const updates: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
 
-    if (error) {
-      console.error('Error updating subtask:', error);
-      return NextResponse.json(
-        { error: 'Failed to update subtask' },
-        { status: 500 }
-      );
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (title) {
+      updates.push(`title = $${paramIndex++}`);
+      params.push(title);
+    }
+    if (description !== undefined) {
+      updates.push(`description = $${paramIndex++}`);
+      params.push(description);
+    }
+    if (priority) {
+      updates.push(`priority = $${paramIndex++}`);
+      params.push(priority);
     }
 
-    return NextResponse.json({ subtask });
+    if (updates.length === 0) {
+      return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
+    }
+
+    params.push(id);
+
+    const result = await query(
+      `UPDATE subtasks SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex} RETURNING *`,
+      params
+    );
+
+    return NextResponse.json({ subtask: result.rows[0] });
   } catch (error) {
     console.error('Error updating subtask:', error);
-    return NextResponse.json(
-      { error: 'Failed to update subtask' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to update subtask' }, { status: 500 });
   }
 }
 
 // DELETE /api/subtask - Delete a subtask
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+
+  if (!id) {
+    return NextResponse.json({ error: 'Subtask ID is required' }, { status: 400 });
+  }
+
   try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json(
-        { error: 'Subtask ID is required' },
-        { status: 400 }
-      );
-    }
-
     // Verify ownership
-    const { data: existing } = await supabase
-      .from('subtasks')
-      .select('user_id')
-      .eq('id', id)
-      .single();
+    const existing = await query(
+      `SELECT user_id FROM subtasks WHERE id = $1`,
+      [id]
+    );
 
-    if (!existing || existing.user_id !== user.id) {
-      return NextResponse.json(
-        { error: 'Subtask not found or forbidden' },
-        { status: 404 }
-      );
+    if (existing.rows.length === 0 || existing.rows[0].user_id !== userId) {
+      return NextResponse.json({ error: 'Subtask not found or forbidden' }, { status: 404 });
     }
 
-    const { error } = await supabase
-      .from('subtasks')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Error deleting subtask:', error);
-      return NextResponse.json(
-        { error: 'Failed to delete subtask' },
-        { status: 500 }
-      );
-    }
+    await query(`DELETE FROM subtasks WHERE id = $1`, [id]);
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting subtask:', error);
-    return NextResponse.json(
-      { error: 'Failed to delete subtask' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to delete subtask' }, { status: 500 });
   }
 }

@@ -1,31 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
-import { listUserRepos, getGitHubAccessToken, syncUserRepos } from '@/lib/github/api-service';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
+import { getGitHubAccessToken, syncUserRepos } from '@/lib/github/api-service';
 
 // GET /api/github/repos - List user's repositories
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const searchParams = request.nextUrl.searchParams;
+    const { searchParams } = new URL(request.url);
     const sync = searchParams.get('sync') === 'true';
-    const sort = (searchParams.get('sort') || 'updated') as 'updated' | 'pushed' | 'full_name' | 'created';
-    const type = (searchParams.get('type') || 'all') as 'all' | 'owner' | 'member' | 'public' | 'private';
 
     // Check if user has a GitHub connection
-    const accessToken = await getGitHubAccessToken(user.id);
+    const accessToken = await getGitHubAccessToken(userId!);
 
     if (!accessToken) {
       return NextResponse.json({
@@ -37,65 +27,28 @@ export async function GET(request: NextRequest) {
 
     // Sync repos if requested
     if (sync) {
-      const { data: connection } = await supabase
-        .from('github_connections')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .single();
+      const connectionResult = await query(
+        `SELECT id FROM github_connections WHERE user_id = $1 AND is_active = true LIMIT 1`,
+        [userId]
+      );
 
-      if (connection) {
-        await syncUserRepos(user.id, connection.id);
+      if (connectionResult.rows.length > 0) {
+        await syncUserRepos(userId!, connectionResult.rows[0].id);
       }
     }
 
     // Get repos from database (cached)
-    const { data: cachedRepos, error: cacheError } = await supabase
-      .from('github_repos')
-      .select('*')
-      .eq('connection_id', (
-        await supabase
-          .from('github_connections')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('is_active', true)
-          .single()
-      ).data?.id || '')
-      .order('updated_at', { ascending: false });
+    const cachedResult = await query(
+      `SELECT * FROM github_repos 
+       WHERE connection_id IN (SELECT id FROM github_connections WHERE user_id = $1 AND is_active = true)
+       ORDER BY updated_at DESC`,
+      [userId]
+    );
 
-    if (cacheError) {
-      console.error('Error fetching cached repos:', cacheError);
-    }
-
-    // If no cached repos or sync requested, fetch from GitHub
-    if (!cachedRepos || cachedRepos.length === 0 || sync) {
-      const repos = await listUserRepos(accessToken, { sort, type, perPage: 100 });
-
-      return NextResponse.json({
-        connected: true,
-        synced: sync,
-        repos: repos.map((repo) => ({
-          id: repo.id,
-          name: repo.name,
-          full_name: repo.full_name,
-          description: repo.description,
-          html_url: repo.html_url,
-          default_branch: repo.default_branch,
-          private: repo.private,
-          language: repo.language,
-          owner: {
-            login: repo.owner.login,
-            avatar_url: repo.owner.avatar_url,
-          },
-        })),
-      });
-    }
-
-    // Return cached repos
     return NextResponse.json({
       connected: true,
-      synced: false,
-      repos: cachedRepos.map((repo: any) => ({
+      synced: sync,
+      repos: cachedResult.rows.map((repo: any) => ({
         id: repo.repo_id,
         name: repo.repo_name,
         full_name: repo.repo_full_name,
@@ -115,45 +68,34 @@ export async function GET(request: NextRequest) {
 
 // DELETE /api/github/repos - Disconnect GitHub
 export async function DELETE(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+  const { searchParams } = new URL(request.url);
+  const connectionId = searchParams.get('connection_id');
+
+  if (!connectionId) {
+    return NextResponse.json({ error: 'Connection ID required' }, { status: 400 });
+  }
+
   try {
-    const supabase = getSupabaseService() as any;
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const searchParams = request.nextUrl.searchParams;
-    const connectionId = searchParams.get('connection_id');
-
-    if (!connectionId) {
-      return NextResponse.json({ error: 'Connection ID required' }, { status: 400 });
-    }
-
     // Verify connection belongs to user
-    const { data: connection, error: fetchError } = await supabase
-      .from('github_connections')
-      .select('id, user_id')
-      .eq('id', connectionId)
-      .single();
+    const connectionResult = await query(
+      `SELECT id, user_id FROM github_connections WHERE id = $1`,
+      [connectionId]
+    );
 
-    if (fetchError || !connection) {
+    if (connectionResult.rows.length === 0) {
       return NextResponse.json({ error: 'Connection not found' }, { status: 404 });
     }
 
-    if (connection.user_id !== user.id) {
+    if (connectionResult.rows[0].user_id !== userId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Delete connection (cascades to repos and files)
-    await supabase.from('github_connections').delete().eq('id', connectionId);
+    await query(`DELETE FROM github_connections WHERE id = $1`, [connectionId]);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,36 +1,21 @@
-import { createClient } from '@/lib/supabase/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth/middleware';
+import { query } from '@/lib/db';
 
 // GET /api/folder - List user's folders
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+    const result = await query(
+      `SELECT * FROM folders WHERE user_id = $1 ORDER BY sort_order ASC`,
+      [userId]
+    );
 
-    const { data: folders, error } = await supabase
-      .from('folders')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('sort_order', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching folders:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch folders' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ folders: folders || [] });
+    return NextResponse.json({ folders: result.rows || [] });
   } catch (error) {
     console.error('Error fetching folders:', error);
     return NextResponse.json(
@@ -41,56 +26,32 @@ export async function GET(request: Request) {
 }
 
 // POST /api/folder - Create a new folder
-export async function POST(request: Request) {
-  try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
 
+  const userId = request.headers.get('x-user-id');
+
+  try {
     const body = await request.json();
     const { name, icon, color, parent_id } = body;
 
     // Get max sort_order
-    const { data: lastFolder } = await supabase
-      .from('folders')
-      .select('sort_order')
-      .eq('user_id', user.id)
-      .order('sort_order', { ascending: false })
-      .limit(1)
-      .single();
+    const lastResult = await query(
+      `SELECT sort_order FROM folders WHERE user_id = $1 ORDER BY sort_order DESC LIMIT 1`,
+      [userId]
+    );
 
-    const sort_order = (lastFolder?.sort_order || 0) + 1;
+    const sort_order = (lastResult.rows[0]?.sort_order || 0) + 1;
 
-    const { data: folder, error } = await supabase
-      .from('folders')
-      .insert({
-        user_id: user.id,
-        name,
-        icon: icon || '📁',
-        color: color || '#3b82f6',
-        parent_id: parent_id || null,
-        sort_order,
-      })
-      .select()
-      .single();
+    const result = await query(
+      `INSERT INTO folders (user_id, name, icon, color, parent_id, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [userId, name, icon || '📁', color || '#3b82f6', parent_id || null, sort_order]
+    );
 
-    if (error) {
-      console.error('Error creating folder:', error);
-      return NextResponse.json(
-        { error: 'Failed to create folder' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ folder });
+    return NextResponse.json({ folder: result.rows[0] });
   } catch (error) {
     console.error('Error creating folder:', error);
     return NextResponse.json(
@@ -101,59 +62,37 @@ export async function POST(request: Request) {
 }
 
 // PATCH /api/folder - Update a folder
-export async function PATCH(request: Request) {
-  try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+export async function PATCH(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
 
+  const userId = request.headers.get('x-user-id');
+
+  try {
     const body = await request.json();
     const { id, name, icon, color, sort_order } = body;
 
     // Verify ownership
-    const { data: existing } = await supabase
-      .from('folders')
-      .select('user_id')
-      .eq('id', id)
-      .single();
+    const existing = await query(
+      `SELECT user_id FROM folders WHERE id = $1`,
+      [id]
+    );
 
-    if (!existing || existing.user_id !== user.id) {
+    if (existing.rows.length === 0 || existing.rows[0].user_id !== userId) {
       return NextResponse.json(
         { error: 'Folder not found or forbidden' },
         { status: 404 }
       );
     }
 
-    const { data: folder, error } = await supabase
-      .from('folders')
-      .update({
-        name,
-        icon,
-        color,
-        sort_order,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const result = await query(
+      `UPDATE folders SET name = $1, icon = $2, color = $3, sort_order = $4, updated_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [name, icon, color, sort_order, id]
+    );
 
-    if (error) {
-      console.error('Error updating folder:', error);
-      return NextResponse.json(
-        { error: 'Failed to update folder' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ folder });
+    return NextResponse.json({ folder: result.rows[0] });
   } catch (error) {
     console.error('Error updating folder:', error);
     return NextResponse.json(
@@ -164,38 +103,29 @@ export async function PATCH(request: Request) {
 }
 
 // DELETE /api/folder - Delete a folder
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+
+  if (!id) {
+    return NextResponse.json(
+      { error: 'Folder ID is required' },
+      { status: 400 }
+    );
+  }
+
   try {
-    const supabase = createClient() as any;
-    
-    // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json(
-        { error: 'Folder ID is required' },
-        { status: 400 }
-      );
-    }
-
     // Verify ownership
-    const { data: existing } = await supabase
-      .from('folders')
-      .select('user_id')
-      .eq('id', id)
-      .single();
+    const existing = await query(
+      `SELECT user_id FROM folders WHERE id = $1`,
+      [id]
+    );
 
-    if (!existing || existing.user_id !== user.id) {
+    if (existing.rows.length === 0 || existing.rows[0].user_id !== userId) {
       return NextResponse.json(
         { error: 'Folder not found or forbidden' },
         { status: 404 }
@@ -203,18 +133,7 @@ export async function DELETE(request: Request) {
     }
 
     // Delete folder (subfolders will be affected by CASCADE)
-    const { error } = await supabase
-      .from('folders')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Error deleting folder:', error);
-      return NextResponse.json(
-        { error: 'Failed to delete folder' },
-        { status: 500 }
-      );
-    }
+    await query(`DELETE FROM folders WHERE id = $1`, [id]);
 
     return NextResponse.json({ success: true });
   } catch (error) {

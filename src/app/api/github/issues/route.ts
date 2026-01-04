@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseService } from '@/lib/supabase/admin';
+import { requireAuth } from '@/lib/auth/middleware';
 import {
   listIssues,
   getIssue,
@@ -11,21 +11,12 @@ import {
 
 // GET /api/github/issues - List issues
 export async function GET(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService();
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const searchParams = request.nextUrl.searchParams;
     const repo = searchParams.get('repo'); // owner/repo format
     const state = (searchParams.get('state') || 'open') as 'open' | 'closed' | 'all';
@@ -38,7 +29,7 @@ export async function GET(request: NextRequest) {
 
     const [owner, repoName] = repo.split('/');
 
-    const issues = await listIssues(user.id, owner, repoName, {
+    const issues = await listIssues(userId!, owner, repoName, {
       state,
       page,
       perPage,
@@ -70,21 +61,12 @@ export async function GET(request: NextRequest) {
 
 // POST /api/github/issues - Create or interact with issue
 export async function POST(request: NextRequest) {
+  const authResponse = await requireAuth(request);
+  if (authResponse) return authResponse;
+
+  const userId = request.headers.get('x-user-id');
+
   try {
-    const supabase = getSupabaseService();
-    
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
     const { action, repo, issue_number, title, body: issueBody, state, labels, comment } = body;
 
@@ -96,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     // Create a new issue
     if (action === 'create' && title) {
-      const issue = await createIssue(user.id, owner, repoName, {
+      const issue = await createIssue(userId!, owner, repoName, {
         title,
         body: issueBody,
         labels,
@@ -125,7 +107,7 @@ export async function POST(request: NextRequest) {
       if (issueBody !== undefined) updateParams.body = issueBody;
       if (labels) updateParams.labels = labels;
 
-      const issue = await updateIssue(user.id, owner, repoName, issue_number, updateParams);
+      const issue = await updateIssue(userId!, owner, repoName, issue_number, updateParams);
 
       if (!issue) {
         return NextResponse.json({ error: 'Failed to update issue' }, { status: 500 });
@@ -143,7 +125,7 @@ export async function POST(request: NextRequest) {
 
     // Add comment to issue
     if (action === 'comment' && issue_number && comment) {
-      const newComment = await createIssueComment(user.id, owner, repoName, issue_number, comment);
+      const newComment = await createIssueComment(userId!, owner, repoName, issue_number, comment);
 
       if (!newComment) {
         return NextResponse.json({ error: 'Failed to add comment' }, { status: 500 });
@@ -162,7 +144,7 @@ export async function POST(request: NextRequest) {
 
     // List comments on issue
     if (action === 'list_comments' && issue_number) {
-      const comments = await listIssueComments(user.id, owner, repoName, issue_number);
+      const comments = await listIssueComments(userId!, owner, repoName, issue_number);
 
       return NextResponse.json({
         issue_number,
@@ -178,7 +160,7 @@ export async function POST(request: NextRequest) {
 
     // Get single issue
     if (issue_number) {
-      const issue = await getIssue(user.id, owner, repoName, issue_number);
+      const issue = await getIssue(userId!, owner, repoName, issue_number);
 
       if (!issue) {
         return NextResponse.json({ error: 'Issue not found' }, { status: 404 });
