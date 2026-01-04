@@ -19,21 +19,7 @@ RUN npm install
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Define build arguments for Supabase (passed via --build-arg from CI/CD)
-ARG NEXT_PUBLIC_SUPABASE_URL
-ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
-ARG SUPABASE_SERVICE_KEY
-
-# Debug: Print ARG values (masked)
-RUN echo "DEBUG ARG: NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:0:10}..."
-RUN echo "DEBUG ARG: NEXT_PUBLIC_SUPABASE_ANON_KEY length=${#NEXT_PUBLIC_SUPABASE_ANON_KEY}"
-RUN echo "DEBUG ARG: SUPABASE_SERVICE_KEY length=${#SUPABASE_SERVICE_KEY}"
-
-# Set environment variables (optional, for server-side use)
-ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-ENV SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-
+# Copy node_modules from deps
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy all config files first
@@ -87,17 +73,7 @@ EXPOSE 3000
 # Environment variables
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-
-# Supabase environment variables (must be available at runtime)
-# NEXT_PUBLIC_ prefix required for client-side access
-# Note: ARG must be redeclared in each stage
-ARG NEXT_PUBLIC_SUPABASE_URL
-ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
-ARG SUPABASE_SERVICE_KEY
-
-ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-ENV SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+ENV NEXUS_CONFIG_PATH=/app/.env.nexus
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
