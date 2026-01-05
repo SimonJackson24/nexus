@@ -107,23 +107,7 @@ export default function InstallPage() {
         throw new Error(data.error || 'Database initialization failed');
       }
 
-      // Create admin user
-      const adminRes = await fetch('/api/install/create-admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.adminEmail,
-          password: formData.adminPassword,
-          displayName: formData.adminDisplayName,
-        }),
-      });
-
-      if (!adminRes.ok) {
-        const data = await adminRes.json();
-        throw new Error(data.error || 'Admin user creation failed');
-      }
-
-      // Save complete config
+      // Save config FIRST (before creating admin)
       const configRes = await fetch('/api/install/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,6 +164,22 @@ export default function InstallPage() {
 
       if (!configRes.ok) {
         throw new Error('Failed to save configuration');
+      }
+
+      // Create admin user (now that config exists)
+      const adminRes = await fetch('/api/install/create-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.adminEmail,
+          password: formData.adminPassword,
+          displayName: formData.adminDisplayName,
+        }),
+      });
+
+      if (!adminRes.ok) {
+        const data = await adminRes.json();
+        throw new Error(data.error || 'Admin user creation failed');
       }
 
       // Redirect to home
