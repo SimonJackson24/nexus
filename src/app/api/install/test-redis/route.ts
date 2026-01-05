@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import net from 'net';
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<Response> {
   try {
     const body = await request.json();
     const { host, port, password, keyPrefix } = body;
@@ -8,17 +9,12 @@ export async function POST(request: NextRequest) {
     const redisHost = host || 'localhost';
     const redisPort = parseInt(port) || 6379;
 
-    // Try to connect to Redis using net socket (no extra dependencies needed)
-    const { net } = await import('net');
-    
-    return new Promise((resolve, reject) => {
+    return new Promise<Response>((resolve, reject) => {
       const socket = new net.Socket();
       
       socket.setTimeout(5000);
       
       socket.on('connect', () => {
-        // If password required, we'd need to send AUTH command
-        // For now just verify connection works
         socket.destroy();
         resolve(NextResponse.json({ success: true }));
       });
