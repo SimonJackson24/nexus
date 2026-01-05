@@ -8,8 +8,6 @@ export default function InstallPage() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [envConfig, setEnvConfig] = useState('');
-  const [installComplete, setInstallComplete] = useState(false);
   
   const [formData, setFormData] = useState({
     // Database
@@ -165,12 +163,11 @@ export default function InstallPage() {
       });
 
       if (!configRes.ok) {
-        throw new Error('Failed to generate environment configuration');
+        throw new Error('Failed to save configuration');
       }
 
       const configData = await configRes.json();
-      setEnvConfig(configData.envConfig);
-
+      
       // Create admin user
       const adminRes = await fetch('/api/install/create-admin', {
         method: 'POST',
@@ -187,7 +184,8 @@ export default function InstallPage() {
         throw new Error(data.error || 'Admin user creation failed');
       }
 
-      // Installation complete - show env vars to copy
+      // Show success message with restart instructions
+      setError('SUCCESS! Configuration saved to .env file.\n\nRun these commands to apply:\n\ncd ~/htdocs/nexus.simoncallaghan.dev\ngit pull\ndocker compose down\ndocker compose up -d\n\nThen login at /api/auth/login');
       setInstallComplete(true);
       setLoading(false);
     } catch (err: any) {
