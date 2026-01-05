@@ -100,8 +100,15 @@ ENABLE_GITHUB_INTEGRATION=${features?.enableGithubIntegration ? 'true' : 'false'
       : path.join(process.cwd(), '.env.nexus');
     
     // Handle case where path is a directory (Docker mount issue)
+    // Use rmSync with force:true to handle locked/busy paths
     if (fs.existsSync(configPath) && fs.lstatSync(configPath).isDirectory()) {
-      fs.rmdirSync(configPath, { recursive: true });
+      try {
+        fs.rmSync(configPath, { recursive: true, force: true });
+      } catch (e) {
+        // If we can't remove the directory (e.g., Docker mount), just skip it
+        // and write the file to the parent path
+        console.warn('Could not remove config directory, file will be written directly');
+      }
     }
     
     fs.writeFileSync(configPath, configContent, 'utf8');
