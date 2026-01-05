@@ -19,13 +19,14 @@ export async function POST(request: NextRequest) {
       ? process.env.NEXUS_CONFIG_PATH
       : path.join(process.cwd(), '.env.nexus');
     
-    if (!fs.existsSync(configPath)) {
+    // Check if config file exists and is a file (not a directory - handle Docker mount issues)
+    if (!fs.existsSync(configPath) || fs.lstatSync(configPath).isDirectory()) {
       return NextResponse.json(
         { error: 'Database not configured' },
         { status: 500 }
       );
     }
-
+    
     const configContent = fs.readFileSync(configPath, 'utf8');
     const config: Record<string, string> = {};
     configContent.split('\n').forEach((line) => {

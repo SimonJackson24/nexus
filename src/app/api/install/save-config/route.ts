@@ -94,8 +94,16 @@ ENABLE_BILLING=${features?.enableBilling ? 'true' : 'false'}
 ENABLE_GITHUB_INTEGRATION=${features?.enableGithubIntegration ? 'true' : 'false'}
 `;
 
-    // Write to config file
-    const configPath = path.join(process.cwd(), '.env.nexus');
+    // Get config path from environment or default
+    const configPath = process.env.NEXUS_CONFIG_PATH 
+      ? process.env.NEXUS_CONFIG_PATH 
+      : path.join(process.cwd(), '.env.nexus');
+    
+    // Handle case where path is a directory (Docker mount issue)
+    if (fs.existsSync(configPath) && fs.lstatSync(configPath).isDirectory()) {
+      fs.rmdirSync(configPath, { recursive: true });
+    }
+    
     fs.writeFileSync(configPath, configContent, 'utf8');
 
     return NextResponse.json({ success: true });
