@@ -25,7 +25,11 @@ export interface SessionPayload {
 // Read config from file
 function getConfig(): Record<string, string> {
   try {
-    const configPath = path.join(process.cwd(), '.env.nexus');
+    // Support NEXUS_CONFIG_PATH environment variable
+    const configPath = process.env.NEXUS_CONFIG_PATH 
+      ? process.env.NEXUS_CONFIG_PATH
+      : path.join(process.cwd(), '.env.nexus');
+    
     if (fs.existsSync(configPath)) {
       const content = fs.readFileSync(configPath, 'utf8');
       const config: Record<string, string> = {};

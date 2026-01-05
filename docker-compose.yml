@@ -1,29 +1,22 @@
-# ============================================
+# ====================================
 # Nexus - Docker Compose Configuration
-# Next.js Application with External Supabase VM
-# ============================================
+# Next.js Application with External PostgreSQL & Redis VMs
+# ====================================
 
 services:
   # ========================================
   # Nexus Next.js Application
   # ========================================
-  # NOTE: Supabase is running on a dedicated VM
-  # Get Supabase URL and keys from: ~/supabase-simple/.env on the VM
   nexus:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: nexus-app
     environment:
-      # Supabase Configuration (from dedicated VM)
-      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      # Configuration file for database and services
+      NEXUS_CONFIG_PATH: /app/.env.nexus
 
-      # Database URL (direct connection to VM Supabase)
-      DATABASE_URL: ${DATABASE_URL}
-
-      # AI Provider API Keys
+      # AI Provider API Keys (optional)
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
@@ -33,10 +26,9 @@ services:
       NEXUS_SECRET_KEY: ${NEXUS_SECRET_KEY}
     ports:
       - "3011:3000"
-    depends_on:
-      - redis
     volumes:
-      - nexus-uploads:/app/uploads
+      # Mount config file for database connection
+      - /home/cloudpanel/data/nexus/nexus.nexus.simoncallaghan.dev/.env.nexus:/app/.env.nexus:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
@@ -44,24 +36,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # ========================================
-  # Redis (Optional - for caching/sessions)
-  # ========================================
-  redis:
-    image: redis:7-alpine
-    container_name: nexus-redis
-    command: redis-server --appendonly yes
-    ports:
-      - "127.0.0.1:6381:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
 # ========================================
 # Volumes
-# ========================================
+# ====================================
 volumes:
-  redis_data:
-    driver: local
-  nexus-uploads:
-    driver: local

@@ -15,7 +15,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Get DB config from environment
-    const configPath = path.join(process.cwd(), '.env.nexus');
+    const configPath = process.env.NEXUS_CONFIG_PATH 
+      ? process.env.NEXUS_CONFIG_PATH
+      : path.join(process.cwd(), '.env.nexus');
+    
     if (!fs.existsSync(configPath)) {
       return NextResponse.json(
         { error: 'Database not configured' },

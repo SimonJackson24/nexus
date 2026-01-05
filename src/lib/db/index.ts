@@ -5,7 +5,13 @@ import path from 'path';
 // Read config from file
 function getConfig(): Record<string, string> {
   try {
-    const configPath = path.join(process.cwd(), '.env.nexus');
+    // Support NEXUS_CONFIG_PATH environment variable
+    const configPath = process.env.NEXUS_CONFIG_PATH 
+      ? process.env.NEXUS_CONFIG_PATH
+      : path.join(process.cwd(), '.env.nexus');
+    
+    console.log('Loading config from:', configPath);
+    
     if (fs.existsSync(configPath)) {
       const content = fs.readFileSync(configPath, 'utf8');
       const config: Record<string, string> = {};
@@ -16,6 +22,8 @@ function getConfig(): Record<string, string> {
         }
       });
       return config;
+    } else {
+      console.warn('Config file not found:', configPath);
     }
   } catch (error) {
     console.error('Error reading config file:', error);
