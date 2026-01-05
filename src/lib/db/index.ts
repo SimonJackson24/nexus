@@ -86,15 +86,21 @@ export async function closePool(): Promise<void> {
 }
 
 // Initialize database schema
+// Looks for schema.sql in root first, then falls back to db-schema/schema-pg.sql
 export async function initializeDatabase(): Promise<void> {
-  const schemaPath = path.join(process.cwd(), 'supabase', 'schema-pg.sql');
+  const possiblePaths = [
+    path.join(process.cwd(), 'schema.sql'),
+    path.join(process.cwd(), 'db-schema', 'schema-pg.sql'),
+  ];
   
-  if (fs.existsSync(schemaPath)) {
+  const schemaPath = possiblePaths.find(p => fs.existsSync(p));
+  
+  if (schemaPath) {
     const schema = fs.readFileSync(schemaPath, 'utf8');
     await query(schema);
-    console.log('Database schema initialized successfully');
+    console.log('Database schema initialized successfully from:', schemaPath);
   } else {
-    throw new Error('Schema file not found: ' + schemaPath);
+    throw new Error('Schema file not found. Looked in: ' + possiblePaths.join(', '));
   }
 }
 

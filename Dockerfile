@@ -30,6 +30,10 @@ COPY tailwind.config.ts .
 COPY tsconfig.json .
 COPY scripts/ ./scripts/
 
+# Copy database schema for installation
+COPY schema.sql .
+COPY db-schema/ ./db-schema/
+
 # Copy source and public
 COPY public ./public
 COPY src ./src

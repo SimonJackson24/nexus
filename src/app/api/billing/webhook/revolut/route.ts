@@ -1,10 +1,9 @@
-import { createClient } from '@/lib/supabase/server';
+import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
 
 // POST /api/billing/webhook/revolut - Handle Revolut webhook
 export async function POST(request: Request) {
   try {
-    const supabase = createClient() as any;
     const body = await request.json();
     
     // Verify webhook signature (in production)
@@ -18,50 +17,59 @@ export async function POST(request: Request) {
       case 'payment_completed':
       case 'order_completed':
         // Update payment status
-        const { error: updateError } = await supabase
-          .from('payments')
-          .update({
-            status: 'completed',
-            revolut_payment_id: eventData.payment_id || eventData.id,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('revolut_order_id', eventData.order_id);
+        await query(
+          `UPDATE payments 
+           SET status = 'completed', 
+               revolut_payment_id = $1,
+               updated_at = NOW()
+           WHERE revolut_order_id = $2`,
+          [eventData.payment_id || eventData.id, eventData.order_id]
+        );
         
-        if (updateError) {
-          console.error('Error updating payment:', updateError);
-          return NextResponse.json({ error: 'Failed to update payment' }, { status: 500 });
+        // Get payment details with metadata
+        const paymentResult = await query(
+          `SELECT * FROM payments WHERE revolut_order_id = $1`,
+          [eventData.order_id]
+        );
+        
+        const payment = paymentResult.rows[0];
+        
+        if (payment?.metadata) {
+          let metadata = payment.metadata;
+          // Handle metadata as either JSON object or string
+          if (typeof metadata === 'string') {
+            try {
+              metadata = JSON.parse(metadata);
+            } catch {
+              metadata = {};
+            }
+          }
+          
+          if (metadata.package_id) {
+            // Add credits to user balance
+            await query(
+              `INSERT INTO user_credits (user_id, credits_balance, total_earned, updated_at)
+               VALUES ($1, $2, $2, NOW())
+               ON CONFLICT (user_id) 
+               DO UPDATE SET 
+                 credits_balance = user_credits.credits_balance + $2,
+                 total_earned = user_credits.total_earned + $2,
+                 updated_at = NOW()`,
+              [payment.user_id, metadata.credits]
+            );
+          }
         }
-        
-        // Grant credits to user
-        const { data: payment } = await supabase
-          .from('payments')
-          .select('*, metadata')
-          .eq('revolut_order_id', eventData.order_id)
-          .single();
-        
-        if (payment?.metadata?.package_id) {
-          // Add credits to user balance
-          await supabase
-            .from('user_credits')
-            .upsert({
-              user_id: payment.user_id,
-              credits_balance: payment.metadata.credits,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: 'user_id' });
-        }
-        
         break;
         
       case 'payment_failed':
       case 'order_failed':
         // Update payment status to failed
-        await supabase
-          .from('payments')
-          .update({
-            status: 'failed',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('revolut_order_id', eventData.order_id);
+        await query(
+          `UPDATE payments 
+           SET status = 'failed', updated_at = NOW()
+           WHERE revolut_order_id = $1`,
+          [eventData.order_id]
+        );
         break;
         
       default:

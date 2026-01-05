@@ -24,12 +24,20 @@ export async function POST(request: NextRequest) {
       connectionTimeoutMillis: 30000,
     });
 
-    // Read and execute schema
-    const schemaPath = path.join(process.cwd(), 'supabase', 'schema-pg.sql');
-    if (!fs.existsSync(schemaPath)) {
-      throw new Error('Schema file not found');
+    // Read schema - look in multiple locations
+    const possiblePaths = [
+      path.join(process.cwd(), 'schema.sql'),
+      path.join(process.cwd(), 'supabase', 'schema-pg.sql'),
+      path.join(process.cwd(), 'supabase', 'schema.sql'),
+    ];
+
+    let schemaPath = possiblePaths.find(p => fs.existsSync(p));
+    
+    if (!schemaPath) {
+      throw new Error('Schema file not found. Looked for: ' + possiblePaths.join(', '));
     }
 
+    console.log('Using schema file:', schemaPath);
     const schema = fs.readFileSync(schemaPath, 'utf8');
     
     // Execute schema in batches (split by semicolons)
