@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
     // Get DB config from environment
     const configPath = process.env.NEXUS_CONFIG_PATH 
       ? process.env.NEXUS_CONFIG_PATH
-      : path.join(process.cwd(), '.env.nexus');
+      : path.join(process.cwd(), '.env');
     
     // Check if config file exists and is a file (not a directory - handle Docker mount issues)
     if (!fs.existsSync(configPath) || fs.lstatSync(configPath).isDirectory()) {

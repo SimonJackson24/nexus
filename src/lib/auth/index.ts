@@ -28,7 +28,7 @@ function getConfig(): Record<string, string> {
     // Support NEXUS_CONFIG_PATH environment variable
     const configPath = process.env.NEXUS_CONFIG_PATH 
       ? process.env.NEXUS_CONFIG_PATH
-      : path.join(process.cwd(), '.env.nexus');
+      : path.join(process.cwd(), '.env');
     
     if (fs.existsSync(configPath)) {
       const content = fs.readFileSync(configPath, 'utf8');
