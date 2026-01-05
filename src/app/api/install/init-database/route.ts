@@ -24,11 +24,11 @@ export async function POST(request: NextRequest) {
       connectionTimeoutMillis: 30000,
     });
 
-    // Read schema - look in multiple locations
+    // Read schema - look in multiple locations (db-schema is the new name, not supabase)
     const possiblePaths = [
       path.join(process.cwd(), 'schema.sql'),
-      path.join(process.cwd(), 'supabase', 'schema-pg.sql'),
-      path.join(process.cwd(), 'supabase', 'schema.sql'),
+      path.join(process.cwd(), 'db-schema', 'schema-pg.sql'),
+      path.join(process.cwd(), 'db-schema', 'schema.sql'),
     ];
 
     let schemaPath = possiblePaths.find(p => fs.existsSync(p));
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
           await pool.query(statement);
         } catch (err: any) {
           // Ignore "already exists" errors
-          if (!err.message.includes('already exists') && !err.message.includes('duplicate key')) {
+          if (!err.message.includes('already exists') && !err.message.includes('duplicate key') && !err.message.includes('no results to return')) {
             console.warn('Schema statement warning:', err.message);
           }
         }
