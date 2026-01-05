@@ -8,6 +8,8 @@ export default function InstallPage() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [envConfig, setEnvConfig] = useState('');
+  const [installComplete, setInstallComplete] = useState(false);
   
   const [formData, setFormData] = useState({
     // Database
@@ -107,7 +109,7 @@ export default function InstallPage() {
         throw new Error(data.error || 'Database initialization failed');
       }
 
-      // Save config FIRST (before creating admin)
+      // Generate environment config (instead of writing to file)
       const configRes = await fetch('/api/install/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -163,10 +165,13 @@ export default function InstallPage() {
       });
 
       if (!configRes.ok) {
-        throw new Error('Failed to save configuration');
+        throw new Error('Failed to generate environment configuration');
       }
 
-      // Create admin user (now that config exists)
+      const configData = await configRes.json();
+      setEnvConfig(configData.envConfig);
+
+      // Create admin user
       const adminRes = await fetch('/api/install/create-admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -182,9 +187,9 @@ export default function InstallPage() {
         throw new Error(data.error || 'Admin user creation failed');
       }
 
-      // Redirect to home
-      router.push('/');
-      router.refresh();
+      // Installation complete - show env vars to copy
+      setInstallComplete(true);
+      setLoading(false);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -249,262 +254,78 @@ export default function InstallPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Step 1: Database Configuration */}
-            {step === 1 && (
-              <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">
-                  1. Database Configuration
-                </h2>
-                <p className="text-sm text-nexus-muted">Connect to your PostgreSQL database</p>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      PostgreSQL Host *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.databaseHost}
-                      onChange={(e) => updateFormData('databaseHost', e.target.value)}
-                      placeholder="localhost or VM IP"
-                      required
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Port *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.databasePort}
-                      onChange={(e) => updateFormData('databasePort', e.target.value)}
-                      placeholder="5432"
-                      required
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-nexus-text mb-1">
-                    Database Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.databaseName}
-                    onChange={(e) => updateFormData('databaseName', e.target.value)}
-                    placeholder="nexus"
-                    required
-                    className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Database User *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.databaseUser}
-                      onChange={(e) => updateFormData('databaseUser', e.target.value)}
-                      placeholder="postgres"
-                      required
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Database Password *
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.databasePassword}
-                      onChange={(e) => updateFormData('databasePassword', e.target.value)}
-                      placeholder="••••••••"
-                      required
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
-                >
-                  Next: Admin Account
-                </button>
+          {/* Installation Complete - Show Environment Variables */}
+          {installComplete ? (
+            <div className="space-y-4">
+              <div className="p-4 bg-green-500/20 border border-green-500/30 rounded-xl">
+                <h3 className="text-lg font-semibold text-green-400 mb-2">✓ Installation Complete!</h3>
+                <p className="text-sm text-gray-300">
+                  Admin user created. Now set these environment variables in CloudPanel:
+                </p>
               </div>
-            )}
 
-            {/* Step 2: Admin Account */}
-            {step === 2 && (
-              <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">
-                  2. Admin Account
-                </h2>
-                <p className="text-sm text-nexus-muted">Create your administrator account</p>
-                
-                <div>
-                  <label className="block text-sm font-medium text-nexus-text mb-1">
-                    Admin Email *
+              <div className="bg-nexus-dark border border-nexus-border rounded-xl p-4">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-sm font-medium text-nexus-text">
+                    Environment Variables
                   </label>
-                  <input
-                    type="email"
-                    value={formData.adminEmail}
-                    onChange={(e) => updateFormData('adminEmail', e.target.value)}
-                    placeholder="admin@example.com"
-                    required
-                    className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-nexus-text mb-1">
-                    Display Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.adminDisplayName}
-                    onChange={(e) => updateFormData('adminDisplayName', e.target.value)}
-                    placeholder="Admin"
-                    className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Password *
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.adminPassword}
-                      onChange={(e) => updateFormData('adminPassword', e.target.value)}
-                      placeholder="••••••••"
-                      required
-                      minLength={8}
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Confirm Password *
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.adminConfirmPassword}
-                      onChange={(e) => updateFormData('adminConfirmPassword', e.target.value)}
-                      placeholder="••••••••"
-                      required
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                </div>
-
-                {formData.adminPassword !== formData.adminConfirmPassword && formData.adminConfirmPassword && (
-                  <p className="text-red-400 text-sm">Passwords do not match</p>
-                )}
-
-                <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => setStep(1)}
-                    className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
+                    onClick={() => navigator.clipboard.writeText(envConfig)}
+                    className="text-xs text-purple-400 hover:text-purple-300"
                   >
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStep(3)}
-                    disabled={!formData.adminEmail || !formData.adminPassword || formData.adminPassword !== formData.adminConfirmPassword}
-                    className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                  >
-                    Next: AI & Redis
+                    Copy All
                   </button>
                 </div>
+                <pre className="text-xs text-gray-400 overflow-auto max-h-96 whitespace-pre-wrap font-mono p-2 bg-black/30 rounded">
+                  {envConfig}
+                </pre>
               </div>
-            )}
 
-            {/* Step 3: AI & Redis */}
-            {step === 3 && (
-              <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">
-                  3. AI Providers & Redis Cache
-                </h2>
-                <p className="text-sm text-nexus-muted">Configure AI providers and Redis for caching</p>
-                
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">AI Providers (Optional)</h3>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      OpenAI API Key
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.openaiKey}
-                      onChange={(e) => updateFormData('openaiKey', e.target.value)}
-                      placeholder="sk-..."
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Anthropic API Key
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.anthropicKey}
-                      onChange={(e) => updateFormData('anthropicKey', e.target.value)}
-                      placeholder="sk-ant-..."
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      MiniMax API Key
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.minimaxKey}
-                      onChange={(e) => updateFormData('minimaxKey', e.target.value)}
-                      placeholder="..."
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">Redis Cache (Optional)</h3>
+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+                <h4 className="text-sm font-medium text-yellow-400 mb-2">Next Steps:</h4>
+                <ol className="text-sm text-gray-300 list-decimal list-inside space-y-1">
+                  <li>Copy these environment variables</li>
+                  <li>Add them to CloudPanel → Your Site → Docker → Environment Variables</li>
+                  <li>Restart the container</li>
+                  <li>Login at <code className="text-purple-400">/api/auth/login</code></li>
+                </ol>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Step 1: Database Configuration */}
+              {step === 1 && (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-semibold text-white">
+                    1. Database Configuration
+                  </h2>
+                  <p className="text-sm text-nexus-muted">Connect to your PostgreSQL database</p>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-nexus-text mb-1">
-                        Redis Host
+                        PostgreSQL Host *
                       </label>
                       <input
                         type="text"
-                        value={formData.redisHost}
-                        onChange={(e) => updateFormData('redisHost', e.target.value)}
-                        placeholder="localhost"
+                        value={formData.databaseHost}
+                        onChange={(e) => updateFormData('databaseHost', e.target.value)}
+                        placeholder="localhost or VM IP"
+                        required
                         className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-nexus-text mb-1">
-                        Redis Port
+                        Port *
                       </label>
                       <input
                         type="text"
-                        value={formData.redisPort}
-                        onChange={(e) => updateFormData('redisPort', e.target.value)}
-                        placeholder="6379"
+                        value={formData.databasePort}
+                        onChange={(e) => updateFormData('databasePort', e.target.value)}
+                        placeholder="5432"
+                        required
                         className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                       />
                     </div>
@@ -512,355 +333,579 @@ export default function InstallPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Redis Password
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.redisPassword}
-                      onChange={(e) => updateFormData('redisPassword', e.target.value)}
-                      placeholder="Leave empty if no password"
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setStep(2)}
-                    className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStep(4)}
-                    className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
-                  >
-                    Next: GitHub & Email
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 4: GitHub & Email */}
-            {step === 4 && (
-              <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">
-                  4. GitHub OAuth & Email
-                </h2>
-                <p className="text-sm text-nexus-muted">Configure integrations and email provider</p>
-                
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">GitHub OAuth (Optional)</h3>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      GitHub Client ID
+                      Database Name *
                     </label>
                     <input
                       type="text"
-                      value={formData.githubClientId}
-                      onChange={(e) => updateFormData('githubClientId', e.target.value)}
-                      placeholder="Iv23..."
+                      value={formData.databaseName}
+                      onChange={(e) => updateFormData('databaseName', e.target.value)}
+                      placeholder="nexus"
+                      required
                       className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                     />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      GitHub Client Secret
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.githubClientSecret}
-                      onChange={(e) => updateFormData('githubClientSecret', e.target.value)}
-                      placeholder="••••••••••••••••"
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Redirect URI
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.githubRedirectUri}
-                      onChange={(e) => updateFormData('githubRedirectUri', e.target.value)}
-                      placeholder="http://localhost:3000/api/github/callback"
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                    <p className="text-xs text-nexus-muted mt-1">Add this to your GitHub OAuth App settings</p>
-                  </div>
-                </div>
-
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">Email Provider (Optional)</h3>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-nexus-text mb-1">
-                        SMTP Host
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.emailHost}
-                        onChange={(e) => updateFormData('emailHost', e.target.value)}
-                        placeholder="smtp.example.com"
-                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-nexus-text mb-1">
-                        SMTP Port
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.emailPort}
-                        onChange={(e) => updateFormData('emailPort', e.target.value)}
-                        placeholder="587"
-                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                      />
-                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-nexus-text mb-1">
-                        SMTP Username
+                        Database User *
                       </label>
                       <input
                         type="text"
-                        value={formData.emailUser}
-                        onChange={(e) => updateFormData('emailUser', e.target.value)}
-                        placeholder="noreply@example.com"
+                        value={formData.databaseUser}
+                        onChange={(e) => updateFormData('databaseUser', e.target.value)}
+                        placeholder="postgres"
+                        required
                         className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-nexus-text mb-1">
-                        SMTP Password
+                        Database Password *
                       </label>
                       <input
                         type="password"
-                        value={formData.emailPassword}
-                        onChange={(e) => updateFormData('emailPassword', e.target.value)}
+                        value={formData.databasePassword}
+                        onChange={(e) => updateFormData('databasePassword', e.target.value)}
                         placeholder="••••••••"
+                        required
                         className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                       />
                     </div>
                   </div>
 
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                  >
+                    Next: Admin Account
+                  </button>
+                </div>
+              )}
+
+              {/* Step 2: Admin Account */}
+              {step === 2 && (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-semibold text-white">
+                    2. Admin Account
+                  </h2>
+                  <p className="text-sm text-nexus-muted">Create your administrator account</p>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-nexus-text mb-1">
+                      Admin Email *
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.adminEmail}
+                      onChange={(e) => updateFormData('adminEmail', e.target.value)}
+                      placeholder="admin@example.com"
+                      required
+                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-nexus-text mb-1">
+                      Display Name
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.adminDisplayName}
+                      onChange={(e) => updateFormData('adminDisplayName', e.target.value)}
+                      placeholder="Admin"
+                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                    />
+                  </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-nexus-text mb-1">
-                        From Name
+                        Password *
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.adminPassword}
+                        onChange={(e) => updateFormData('adminPassword', e.target.value)}
+                        placeholder="••••••••"
+                        required
+                        minLength={8}
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Confirm Password *
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.adminConfirmPassword}
+                        onChange={(e) => updateFormData('adminConfirmPassword', e.target.value)}
+                        placeholder="••••••••"
+                        required
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                      />
+                    </div>
+                  </div>
+
+                  {formData.adminPassword !== formData.adminConfirmPassword && formData.adminConfirmPassword && (
+                    <p className="text-red-400 text-sm">Passwords do not match</p>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStep(1)}
+                      className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      disabled={!formData.adminEmail || !formData.adminPassword || formData.adminPassword !== formData.adminConfirmPassword}
+                      className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      Next: AI & Redis
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: AI & Redis */}
+              {step === 3 && (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-semibold text-white">
+                    3. AI Providers & Redis Cache
+                  </h2>
+                  <p className="text-sm text-nexus-muted">Configure AI providers and Redis for caching</p>
+                  
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">AI Providers (Optional)</h3>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        OpenAI API Key
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.openaiKey}
+                        onChange={(e) => updateFormData('openaiKey', e.target.value)}
+                        placeholder="sk-..."
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Anthropic API Key
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.anthropicKey}
+                        onChange={(e) => updateFormData('anthropicKey', e.target.value)}
+                        placeholder="sk-ant-..."
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        MiniMax API Key
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.minimaxKey}
+                        onChange={(e) => updateFormData('minimaxKey', e.target.value)}
+                        placeholder="..."
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">Redis Cache (Optional)</h3>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          Redis Host
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.redisHost}
+                          onChange={(e) => updateFormData('redisHost', e.target.value)}
+                          placeholder="localhost"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          Redis Port
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.redisPort}
+                          onChange={(e) => updateFormData('redisPort', e.target.value)}
+                          placeholder="6379"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Redis Password
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.redisPassword}
+                        onChange={(e) => updateFormData('redisPassword', e.target.value)}
+                        placeholder="Leave empty if no password"
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep(4)}
+                      className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    >
+                      Next: GitHub & Email
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 4: GitHub & Email */}
+              {step === 4 && (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-semibold text-white">
+                    4. GitHub OAuth & Email
+                  </h2>
+                  <p className="text-sm text-nexus-muted">Configure integrations and email provider</p>
+                  
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">GitHub OAuth (Optional)</h3>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        GitHub Client ID
                       </label>
                       <input
                         type="text"
-                        value={formData.emailFromName}
-                        onChange={(e) => updateFormData('emailFromName', e.target.value)}
+                        value={formData.githubClientId}
+                        onChange={(e) => updateFormData('githubClientId', e.target.value)}
+                        placeholder="Iv23..."
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        GitHub Client Secret
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.githubClientSecret}
+                        onChange={(e) => updateFormData('githubClientSecret', e.target.value)}
+                        placeholder="••••••••••••••••"
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Redirect URI
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.githubRedirectUri}
+                        onChange={(e) => updateFormData('githubRedirectUri', e.target.value)}
+                        placeholder="http://localhost:3000/api/github/callback"
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                      />
+                      <p className="text-xs text-nexus-muted mt-1">Add this to your GitHub OAuth App settings</p>
+                    </div>
+                  </div>
+
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">Email Provider (Optional)</h3>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          SMTP Host
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.emailHost}
+                          onChange={(e) => updateFormData('emailHost', e.target.value)}
+                          placeholder="smtp.example.com"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          SMTP Port
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.emailPort}
+                          onChange={(e) => updateFormData('emailPort', e.target.value)}
+                          placeholder="587"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          SMTP Username
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.emailUser}
+                          onChange={(e) => updateFormData('emailUser', e.target.value)}
+                          placeholder="noreply@example.com"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          SMTP Password
+                        </label>
+                        <input
+                          type="password"
+                          value={formData.emailPassword}
+                          onChange={(e) => updateFormData('emailPassword', e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          From Name
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.emailFromName}
+                          onChange={(e) => updateFormData('emailFromName', e.target.value)}
+                          placeholder="Nexus AI"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          From Email
+                        </label>
+                        <input
+                          type="email"
+                          value={formData.emailFromEmail}
+                          onChange={(e) => updateFormData('emailFromEmail', e.target.value)}
+                          placeholder="noreply@nexus.local"
+                          className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStep(3)}
+                      className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep(5)}
+                      className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
+                    >
+                      Next: Branding & Secret
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 5: Branding & Secret */}
+              {step === 5 && (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-semibold text-white">
+                    5. Branding & Security
+                  </h2>
+                  <p className="text-sm text-nexus-muted">Customize your site and set security keys</p>
+                  
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">Site Branding</h3>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Site Name
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.siteName}
+                        onChange={(e) => updateFormData('siteName', e.target.value)}
                         placeholder="Nexus AI"
                         className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                       />
                     </div>
+
                     <div>
                       <label className="block text-sm font-medium text-nexus-text mb-1">
-                        From Email
+                        Site Description
                       </label>
                       <input
-                        type="email"
-                        value={formData.emailFromEmail}
-                        onChange={(e) => updateFormData('emailFromEmail', e.target.value)}
-                        placeholder="noreply@nexus.local"
+                        type="text"
+                        value={formData.siteDescription}
+                        onChange={(e) => updateFormData('siteDescription', e.target.value)}
+                        placeholder="AI-Powered Development Platform"
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          Primary Color
+                        </label>
+                        <input
+                          type="color"
+                          value={formData.primaryColor}
+                          onChange={(e) => updateFormData('primaryColor', e.target.value)}
+                          className="w-full h-12 bg-nexus-dark border border-nexus-border rounded-xl"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          Secondary Color
+                        </label>
+                        <input
+                          type="color"
+                          value={formData.secondaryColor}
+                          onChange={(e) => updateFormData('secondaryColor', e.target.value)}
+                          className="w-full h-12 bg-nexus-dark border border-nexus-border rounded-xl"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-nexus-text mb-1">
+                          Accent Color
+                        </label>
+                        <input
+                          type="color"
+                          value={formData.accentColor}
+                          onChange={(e) => updateFormData('accentColor', e.target.value)}
+                          className="w-full h-12 bg-nexus-dark border border-nexus-border rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Footer Text
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.footerText}
+                        onChange={(e) => updateFormData('footerText', e.target.value)}
+                        placeholder="Powered by Nexus AI"
                         className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
                       />
                     </div>
                   </div>
-                </div>
 
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setStep(3)}
-                    className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStep(5)}
-                    className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity"
-                  >
-                    Next: Branding & Secret
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 5: Branding & Secret */}
-            {step === 5 && (
-              <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-white">
-                  5. Branding & Security
-                </h2>
-                <p className="text-sm text-nexus-muted">Customize your site and set security keys</p>
-                
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">Site Branding</h3>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Site Name
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.siteName}
-                      onChange={(e) => updateFormData('siteName', e.target.value)}
-                      placeholder="Nexus AI"
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Site Description
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.siteDescription}
-                      onChange={(e) => updateFormData('siteDescription', e.target.value)}
-                      placeholder="AI-Powered Development Platform"
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-nexus-text mb-1">
-                        Primary Color
-                      </label>
-                      <input
-                        type="color"
-                        value={formData.primaryColor}
-                        onChange={(e) => updateFormData('primaryColor', e.target.value)}
-                        className="w-full h-12 bg-nexus-dark border border-nexus-border rounded-xl"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-nexus-text mb-1">
-                        Secondary Color
-                      </label>
-                      <input
-                        type="color"
-                        value={formData.secondaryColor}
-                        onChange={(e) => updateFormData('secondaryColor', e.target.value)}
-                        className="w-full h-12 bg-nexus-dark border border-nexus-border rounded-xl"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-nexus-text mb-1">
-                        Accent Color
-                      </label>
-                      <input
-                        type="color"
-                        value={formData.accentColor}
-                        onChange={(e) => updateFormData('accentColor', e.target.value)}
-                        className="w-full h-12 bg-nexus-dark border border-nexus-border rounded-xl"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Footer Text
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.footerText}
-                      onChange={(e) => updateFormData('footerText', e.target.value)}
-                      placeholder="Powered by Nexus AI"
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted"
-                    />
-                  </div>
-                </div>
-
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">Feature Settings</h3>
-                  
-                  <div className="space-y-3">
-                    <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={formData.allowRegistration === 'true'}
-                        onChange={(e) => updateFormData('allowRegistration', e.target.checked ? 'true' : 'false')}
-                        className="w-5 h-5 rounded border-nexus-border bg-nexus-dark text-purple-600"
-                      />
-                      <span className="text-white">Allow new user registration</span>
-                    </label>
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">Feature Settings</h3>
                     
-                    <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={formData.enableBilling === 'true'}
-                        onChange={(e) => updateFormData('enableBilling', e.target.checked ? 'true' : 'false')}
-                        className="w-5 h-5 rounded border-nexus-border bg-nexus-dark text-purple-600"
-                      />
-                      <span className="text-white">Enable billing system</span>
-                    </label>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={formData.allowRegistration === 'true'}
+                          onChange={(e) => updateFormData('allowRegistration', e.target.checked ? 'true' : 'false')}
+                          className="w-5 h-5 rounded border-nexus-border bg-nexus-dark text-purple-600"
+                        />
+                        <span className="text-white">Allow new user registration</span>
+                      </label>
+                      
+                      <label className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={formData.enableBilling === 'true'}
+                          onChange={(e) => updateFormData('enableBilling', e.target.checked ? 'true' : 'false')}
+                          className="w-5 h-5 rounded border-nexus-border bg-nexus-dark text-purple-600"
+                        />
+                        <span className="text-white">Enable billing system</span>
+                      </label>
+                      
+                      <label className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={formData.enableGithubIntegration === 'true'}
+                          onChange={(e) => updateFormData('enableGithubIntegration', e.target.checked ? 'true' : 'false')}
+                          className="w-5 h-5 rounded border-nexus-border bg-nexus-dark text-purple-600"
+                        />
+                        <span className="text-white">Enable GitHub integration</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="border border-nexus-border rounded-xl p-4 space-y-4">
+                    <h3 className="font-medium text-purple-400">Security</h3>
                     
-                    <label className="flex items-center gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-nexus-text mb-1">
+                        Nexus Secret Key *
+                        <span className="text-nexus-muted ml-2 font-normal">Generate with: openssl rand -base64 32</span>
+                      </label>
                       <input
-                        type="checkbox"
-                        checked={formData.enableGithubIntegration === 'true'}
-                        onChange={(e) => updateFormData('enableGithubIntegration', e.target.checked ? 'true' : 'false')}
-                        className="w-5 h-5 rounded border-nexus-border bg-nexus-dark text-purple-600"
+                        type="password"
+                        value={formData.nexusSecret}
+                        onChange={(e) => updateFormData('nexusSecret', e.target.value)}
+                        placeholder="Your 32+ character secret key"
+                        required
+                        minLength={32}
+                        className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
                       />
-                      <span className="text-white">Enable GitHub integration</span>
-                    </label>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStep(4)}
+                      className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading || !formData.nexusSecret || formData.nexusSecret.length < 32}
+                      className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {loading ? 'Setting up...' : 'Complete Installation'}
+                    </button>
                   </div>
                 </div>
-
-                <div className="border border-nexus-border rounded-xl p-4 space-y-4">
-                  <h3 className="font-medium text-purple-400">Security</h3>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-nexus-text mb-1">
-                      Nexus Secret Key *
-                      <span className="text-nexus-muted ml-2 font-normal">Generate with: openssl rand -base64 32</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.nexusSecret}
-                      onChange={(e) => updateFormData('nexusSecret', e.target.value)}
-                      placeholder="Your 32+ character secret key"
-                      required
-                      minLength={32}
-                      className="w-full px-4 py-3 bg-nexus-dark border border-nexus-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-nexus-muted font-mono text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setStep(4)}
-                    className="flex-1 py-3 bg-nexus-dark text-white rounded-xl font-medium hover:bg-nexus-border transition-colors"
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loading || !formData.nexusSecret || formData.nexusSecret.length < 32}
-                    className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                  >
-                    {loading ? 'Setting up...' : 'Complete Installation'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </form>
+              )}
+            </form>
+          )}
         </div>
 
         {/* Help */}
